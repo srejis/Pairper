@@ -3,6 +3,7 @@
 import json
 import os
 import sqlite3
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -22,7 +23,15 @@ def write_json(path: Path, value):
     temp = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
     try:
         temp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(temp, path)
+        # Windows readers briefly hold a sharing lock; retain atomic replacement and retry.
+        for attempt in range(6):
+            try:
+                os.replace(temp, path)
+                break
+            except PermissionError:
+                if attempt == 5:
+                    raise
+                time.sleep(0.05 * (attempt + 1))
     finally:
         temp.unlink(missing_ok=True)
 

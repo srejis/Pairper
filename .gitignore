@@ -6,4 +6,12 @@ __pycache__/
 tmp/
 .pairper/
 dist/
+.env
+.env.*
+!.env.example
+*.credentials.json
+*.runtime-key
+frontend/node_modules/
+frontend/coverage/
+*.log
 

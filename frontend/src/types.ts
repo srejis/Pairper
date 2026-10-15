@@ -1,0 +1,41 @@
+export type PaperStatus = 'registered' | 'processing' | 'complete' | 'review_required' | 'failed';
+export interface Paper {
+  id: string; title: string; filename: string; page_count: number;
+  status: PaperStatus; has_view: boolean; current_view_id: string | null;
+}
+export type BlockType = 'title' | 'authors' | 'heading' | 'paragraph' | 'list' | 'equation' |
+  'figure' | 'table' | 'caption' | 'footnote' | 'reference' | 'source_region';
+export interface TextRun { kind: 'text'; prefix: string; text: string }
+export interface MathRun { kind: 'math'; prefix: string; latex: string;
+  source_verified: boolean; image_url: string }
+export type Run = TextRun | MathRun;
+export interface Cell {
+  row: number; column: number; rowspan: number; colspan: number; header: boolean; runs: Run[];
+}
+export interface BlockContent {
+  runs: Run[]; items: Run[][]; cells: Cell[]; level: number; ordered: boolean;
+  source_verified: boolean; image_url: string | null; latex: string | null;
+  number: string; caption_id: string | null;
+}
+export interface DocumentBlock {
+  id: string; type: BlockType; order: number; validation_status: string; content: BlockContent;
+  source_trace: { id: string; page: number; text: string; bbox: number[] }[];
+}
+export interface DisplayDocument {
+  display_schema_version: '1.0'; source_schema_version: '1.0';
+  paper_id: string; view_id: string; blocks: DocumentBlock[];
+  normalization_audit: unknown[];
+}
+export interface ConnectionStatus {
+  state: string; message: string; checked_at: string | null; last_healthy_at: string | null;
+  healthy: boolean; ready: boolean; admin_url: string | null; chatgpt_verified: boolean;
+  last_tunnel_tool_at?: string; last_tunnel_tool?: string;
+}
+export interface PairperApi {
+  listPapers(): Promise<Paper[]>;
+  getDocument(id: string): Promise<DisplayDocument>;
+  connectionStatus(): Promise<ConnectionStatus>;
+  importPdfs(): Promise<{ imported: number; failed: number }>;
+  openDiagnostics(): Promise<ConnectionStatus>;
+  onLibraryChanged(listener: () => void): () => void;
+}

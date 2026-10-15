@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 
 from pairper.document.models import Document, MathRun
+from pairper.document.text import resolve_text, resolved_runs
 
 WEB = Path(__file__).resolve().parents[1] / "web"
 
@@ -15,19 +16,7 @@ def esc(value):
 
 
 def join_text(run, spans, audit):
-    texts = [spans[ref]["text"] for ref in run.refs]
-    separator = {"space": " ", "none": "", "newline": "\n", "dehyphenate": " "}[run.join]
-    result = texts[0] if texts else ""
-    for text in texts[1:]:
-        if run.join == "dehyphenate" and result.endswith("-"):
-            result = result[:-1] + text
-        else:
-            result += separator + text
-    if len(texts) > 1:
-        audit.append(
-            {"refs": run.refs, "original_strings": texts, "operation": run.join, "result": result}
-        )
-    return esc(result)
+    return esc(resolve_text(run, spans, audit))
 
 
 def render_document(library, doc: Document, output: Path):
@@ -53,11 +42,12 @@ def render_document(library, doc: Document, output: Path):
 
     def runs(items):
         parts = []
-        for run in items:
+        for run, prefix, text in resolved_runs(items, spans, audit):
+            parts.append(esc(prefix))
             if isinstance(run, MathRun):
                 parts.append(math(run.latex, run.region, run.source_verified, False))
             else:
-                parts.append(join_text(run, spans, audit))
+                parts.append(esc(text))
         return "".join(parts)
 
     bodies = []

@@ -26,6 +26,7 @@ class TextRun(StrictModel):
     kind: Literal["text"] = "text"
     refs: list[str] = Field(min_length=1)
     join: Literal["space", "none", "newline", "dehyphenate"] = "space"
+    before: Literal["auto", "none", "space", "newline"] = "auto"
 
 
 class MathRun(StrictModel):
@@ -35,6 +36,7 @@ class MathRun(StrictModel):
     refs: list[str] = Field(default_factory=list)
     # Human/AI review is recorded; it is never inferred from valid LaTeX syntax.
     source_verified: bool = False
+    before: Literal["auto", "none", "space", "newline"] = "auto"
 
 
 Run = Annotated[TextRun | MathRun, Field(discriminator="kind")]

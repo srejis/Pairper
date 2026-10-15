@@ -1,74 +1,86 @@
-# MCP 실행과 연결
+# Pairper MCP 및 Windows 터널 운영
 
-## 로컬 stdio
+## 프로젝트 설정
 
-GUI를 켜지 않아도 동작합니다. stdout은 MCP 전용이며 오류 로그는 stderr로 전달됩니다.
+기존 `D:\project\18_pairper\.env`가 있으면 그대로 사용합니다. 실행기와 진단기는 파일 내용을 덮어쓰지 않고 현재 사용자만 읽고 쓸 수 있도록 DACL을 제한합니다. 파일이 없을 때만 `.env.example`을 참고해 직접 만드세요.
+
+필수 변수는 `CONTROL_PLANE_API_KEY`와 `CONTROL_PLANE_TUNNEL_ID`이며, 선택 변수는 `PAIRPER_DATA_DIR`입니다. 인증에는 실제 `sk-proj-` 비밀 키를 사용합니다. `key_` Tracking ID는 인증 키가 아닙니다. 비밀값을 채팅, 명령줄, 커밋에 넣지 않습니다.
+
+지원 `.env` 문법:
+
+- UTF-8, 한 줄에 `KEY=value` 하나. 빈 줄과 `#`로 시작하는 주석 허용.
+- 변수 이름은 위 세 가지만 허용. 중복 키·빈 값·잘못된 형식은 행 번호로 진단.
+- 작은따옴표/큰따옴표로 감싼 한 줄 값 지원. 공백이 있는 경로는 따옴표 필요.
+- 인라인 주석, `export`, 여러 줄, escape, 보간은 지원하지 않음. `$()`도 실행하지 않고 리터럴로 취급하며, 키 형식 검사에서 거절됨.
+- `PAIRPER_DATA_DIR`은 절대 경로. 생략 시 기본 사용자 Local AppData 라이브러리 사용.
+
+영구 사용자/시스템 환경변수는 변경하지 않습니다. `.env`는 Python 실행기가 읽고 자신의 터널 자식 환경에만 전달합니다. 다른 프로젝트의 OpenAI·MCP·터널 환경 설정은 자식 환경에서 제거합니다.
+
+## 최초 수동 검증과 실행
 
 ```powershell
-uv run pairper-mcp
-# 또는
+cd D:\project\18_pairper
+.\test-pairper-tunnel.ps1
+.\start-pairper-tunnel.ps1
+```
+
+기본 실행 파일 위치가 달라졌으면 한 번 명시해 저장합니다.
+
+```powershell
+.\test-pairper-tunnel.ps1 -ClientPath 'D:\tools\another-folder\tunnel-client.exe'
+```
+
+경로는 `.pairper/settings.json`에서 관리합니다. 실행기/진단기가 같은 설정을 재사용합니다. `.pairper/tunnel-client.yaml`은 공식 `sample_mcp_stdio_local`과 같은 설정이며 JSON 문법의 YAML 1.2입니다. 키 대신 `env:CONTROL_PLANE_API_KEY` 참조를 기록합니다. `main` 채널 명령은 프로젝트 `.venv/Scripts/python.exe -m pairper.mcp.server`로 고정하며 임의 명령으로 수정된 프로필은 실행하지 않습니다. 정상 파일을 반복 실행할 때 다시 쓰지 않습니다.
+
+`doctor`는 설정·실행 경로·로컬 바인딩을 검사합니다. doctor 성공만으로 원격 인증이나 ChatGPT 호출이 성공한 것은 아닙니다. 실제 `run` 후 별도 콘솔에서 상태를 확인하세요.
+
+```powershell
+.\test-pairper-tunnel.ps1 -StatusOnly
+```
+
+실제 관리 UI 주소는 이 결과의 `admin_url`에 표시합니다. health/admin은 `127.0.0.1:0`으로 동적 포트를 배정받아 `.pairper/health.url`에 기록하므로 다른 프로젝트의 기본 포트와 충돌하지 않습니다. `/healthz`는 프로세스 건강 상태, `/readyz`는 런타임 준비 상태이며 구분하여 조회합니다. GUI의 **연결 진단**으로 실행 중인 로컬 관리 UI를 열 수 있습니다.
+
+프로세스는 파일 잠금으로 중복 실행을 막습니다. 같은 프로젝트 실행기를 다시 시작하면 기존 인스턴스를 그대로 두고 오류를 반환합니다. Windows Job Object가 부모와 자식 수명을 묶으므로 실행기를 종료하면 전용 터널/MCP 자식도 종료됩니다. 다른 프로젝트 프로세스를 검색해서 일괄 종료하지 않습니다.
+
+로그는 `.pairper/doctor.log`, `.pairper/tunnel.log`이며 키와 터널 식별자를 마스킹합니다. `.env`, 프로필, 로그는 Git에 포함하지 않습니다. 임시 인증 실패가 아닌 영구적인 401/403/인증 오류를 감지하면 상태를 남기고 자동 무한 재시도를 중단합니다.
+
+## 로그인 자동 시작
+
+실제 ChatGPT 연결을 검증한 뒤 **사용자가 설치 스크립트를 한 번 실행**합니다. 앱 실행·테스트는 자동으로 등록하지 않습니다.
+
+```powershell
+.\install-pairper-autostart.ps1 -ValidateOnly  # 등록하지 않고 설정만 확인
+.\install-pairper-autostart.ps1               # 현재 사용자용 등록
+.\uninstall-pairper-autostart.ps1             # 등록만 해제
+```
+
+작업 이름은 `Pairper MCP Tunnel`입니다. 로그인 20초 후 숨김 PowerShell로 실행하며 작업 디렉터리와 스크립트는 절대 경로입니다. 일반 사용자 권한, 중복 실행 무시, 비정상 종료 시 1분 간격 최대 3회 재시작, 실행 시간 제한 없음으로 설정합니다. 작업에는 키가 들어가지 않습니다. 같은 이름의 다른 프로젝트 작업은 수정하지 않습니다.
+
+설치 후 로그아웃/재로그인하여 자동 실행 → readiness → ChatGPT 도구 호출 → 중복 프로세스 없음 → 기존 데이터 유지를 확인해야 합니다. 이 검증 때문에 실행 중인 사용자 세션을 자동으로 종료하지 않습니다. 등록 해제는 다른 작업을 건드리지 않으며 현재 수동 실행 터널은 별개입니다.
+
+## ChatGPT 연결과 검증 단계
+
+[OpenAI 공식 Secure MCP Tunnel 문서](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels) 및 설치된 v0.0.16의 도움말을 확인했습니다. 사용자가 준비한 기존 터널·프로젝트·런타임 키를 재사용합니다. 조직의 터널 관리/사용 권한과 대상 ChatGPT 워크스페이스 연결이 필요합니다.
+
+ChatGPT의 사용자 지정 MCP 등록 화면에서 기존 `pairper-local` 터널을 선택하는 작업은 사용자가 진행합니다. 터널 실행기를 켜 둔 상태에서 다음을 확인하세요.
+
+1. 도구 목록에서 Pairper 11개 도구 발견.
+2. `list_papers` 결과와 실제 앱 라이브러리 비교.
+3. `get_page_image`의 PNG가 모델에 전달되는지 확인.
+4. 테스트 논문의 블록 저장·검증·확정 후 로컬 DB와 앱에서 결과 확인.
+
+**로컬 stdio 테스트, 실제 터널 인증/readiness, ChatGPT 실제 도구 호출은 서로 다른 검증 단계입니다.** UI는 실제 health 확인 후에만 “로컬 터널 런타임 준비 완료”를 표시합니다. 마지막 정상 통신/진단 시각과 터널 경유 성공 도구의 이름·시각을 볼 수 있지만, 호출자가 ChatGPT였다는 사실은 별도 확인해야 합니다.
+
+## 로컬 stdio 직접 연결
+
+터널 없이 로컬 MCP 클라이언트가 사용할 수도 있습니다. GUI와 독립적인 기존 인터페이스를 유지했습니다.
+
+```powershell
 .\.venv\Scripts\python.exe -m pairper.mcp.server
 ```
 
-stdio 서버는 MCP 클라이언트가 프로세스를 실행해 입출력 파이프로 연결합니다. 콘솔에서 단독 실행한 뒤 출력이 없고 기다리는 것은 정상입니다.
+stdout은 MCP 전용입니다. 도구는 `list_papers`, `list_pending_papers`, `get_paper_manifest`, `get_page_content`, `get_page_image`, `get_region_image`, `begin_view_build`, `append_document_blocks`, `validate_view_build`, `finalize_view_build`, `get_build_report`입니다. 서버의 `update_papers` 프롬프트와 `pairper://document-schema` 리소스에 문서 계약이 있습니다.
 
-로컬 MCP 클라이언트 설정 예시:
+페이지 번호는 1부터, 좌표는 회전 제거한 PDF point 기준 좌상단 원점입니다. 텍스트는 span refs로 연결하며 수식/표/그림에는 원본 영역을 지정합니다. `source_verified`와 `visual_review_pages`는 검토자의 진술이므로 자동 의미 보존 증명으로 간주하지 않습니다. 작업은 같은 ID로 재개·수정하고 검증 통과 후에만 확정합니다. 원본 PDF 삭제·임의 파일 읽기 도구는 없습니다.
 
-```json
-{
-  "mcpServers": {
-    "pairper": {
-      "command": "D:\\project\\18_pairper\\.venv\\Scripts\\python.exe",
-      "args": ["-m", "pairper.mcp.server"],
-      "env": {
-        "PAIRPER_DATA_DIR": "C:\\Users\\sreji\\AppData\\Local\\Pairper\\library"
-      }
-    }
-  }
-}
-```
-
-실제 라이브러리 경로는 앱 상태 표시줄과 **MCP 연결 방법** 버튼에서 확인하세요. 위 예시의 경로는 사용자 설정에 맞게 바꿉니다. 임의 파일 읽기·원본 삭제·덮어쓰기 도구는 제공하지 않습니다.
-
-공식 [MCP Python SDK](https://py.sdk.modelcontextprotocol.io/)와 설치된 API를 확인해 `mcp==2.3.0` 및 `MCPServer`를 사용했습니다. 전체 전이 의존성은 `uv.lock`으로 고정했습니다.
-
-## GPT 작업 계약
-
-첫 도구는 `list_pending_papers`입니다. 서버의 `update_papers` 프롬프트 및 `pairper://document-schema` 리소스를 읽습니다. 도구는 다음 11개입니다.
-
-`list_papers`, `list_pending_papers`, `get_paper_manifest`, `get_page_content`, `get_page_image`, `get_region_image`, `begin_view_build`, `append_document_blocks`, `validate_view_build`, `finalize_view_build`, `get_build_report`.
-
-- 페이지 번호는 1부터 시작합니다. 좌표는 회전을 제거한 PDF point 좌표이며 좌측 상단이 원점입니다. `rotation`은 원본 영역 이미지를 읽기 방향으로 회전하는 옵션입니다.
-- span ID는 최초 추출 결과와 함께 영구 저장합니다. 재추출은 자동 수행하지 않습니다.
-- 텍스트는 `content.runs = [{"kind":"text","refs":["실제 span ID"],"join":"space"}]`로 전달합니다. `none`, `newline`, `dehyphenate`도 지원합니다.
-- 본문 문자열·HTML·임의 파일 경로는 문서 계약에 없습니다. 인라인 수식도 원본 영역과 refs를 연결합니다.
-- `source_refs`에는 실제 텍스트 참조와 해당 블록의 모든 원본 영역에 완전히 포함되는 span의 합집합을 넣습니다. 거짓 참조 선언만으로 누락 검사를 통과할 수 없습니다.
-- 표 셀은 `row`, `column`, `rowspan`, `colspan`, `runs`로 구성합니다. 셀 숫자도 원문 refs로만 표시합니다.
-- `source_verified=false`인 수식/표는 원본 영역 이미지로 표시합니다. `true`는 검토자의 대조 진술이며 코드가 의미적 동일성을 증명한 것은 아닙니다. LaTeX 구문 오류는 브라우저에서 원본 이미지로 대체합니다.
-- 그림/수식/표/불확실 영역에는 `content.region`이 필수입니다. `asset_id`는 서비스가 결정합니다.
-- `visual_review_pages`는 실제 이미지를 확인한 페이지에만 기록하세요. PNG가 도구 응답으로 반환된다는 사실과 모델이 이미지를 읽었다는 사실은 다릅니다.
-- 같은 작업은 `begin_view_build`로 재개하고, 블록은 같은 ID로 교체합니다. 배치 재시도는 멱등적입니다. `get_build_report`에서 현재 전체 문서를 볼 수 있습니다.
-- 잘못 추가한 블록이나 생략 기록은 `append_document_blocks`의 `remove_block_ids`, `remove_omission_refs`로 제거할 수 있습니다. 확정된 뷰에는 적용할 수 없습니다.
-- 렌더러가 페이지 이미지 뷰어로 대체되지 않도록, 텍스트가 추출된 페이지의 전체 영역 fallback은 거절합니다. 스캔 페이지는 전체 원본 이미지 보존을 허용하고 텍스트 추출 불가 사실을 manifest에 표시합니다.
-
-## ChatGPT와 Secure MCP Tunnel
-
-로컬 stdio 테스트 통과는 ChatGPT 연결 성공을 뜻하지 않습니다. 이 환경에는 Pairper용 터널 ID·런타임 자격증명·ChatGPT 플러그인 연결이 준비되어 있지 않습니다.
-
-아래는 2026-10-15에 확인한 [OpenAI 공식 Secure MCP Tunnel 안내](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)에 따른 설정 절차입니다. 조직/워크스페이스에서 해당 기능과 권한을 사용할 수 있어야 합니다.
-
-1. Platform의 터널 설정에서 터널을 생성하거나 재사용하고, 대상 Platform 조직과 ChatGPT 워크스페이스의 연결을 확인합니다. 생성에는 Tunnels Read + Manage, 실행에는 Read + Use 권한이 필요합니다.
-2. 공식 안내의 다운로드 링크에서 지원되는 `tunnel-client`를 설치하고 `tunnel-client help quickstart`를 확인합니다. 런타임 키는 로컬 환경변수 `CONTROL_PLANE_API_KEY`로 설정하며 채팅·저장소·명령 인수에 키 값을 남기지 않습니다.
-3. Pairper와 같은 사용자 계정 및 라이브러리 경로에서 stdio 프로필을 만듭니다.
-
-```powershell
-$env:PAIRPER_DATA_DIR = 'C:\Users\sreji\AppData\Local\Pairper\library'
-tunnel-client init --sample sample_mcp_stdio_local --profile pairper --tunnel-id YOUR_TUNNEL_ID --mcp-command 'D:\project\18_pairper\.venv\Scripts\python.exe -m pairper.mcp.server'
-tunnel-client doctor --profile pairper --explain
-tunnel-client run --profile pairper
-```
-
-4. `tunnel-client run`은 연결하는 동안 유지합니다. ChatGPT의 사용자 지정 MCP 추가 화면에서 연결 방식 **Tunnel**과 해당 터널을 선택합니다. 실제 화면과 계정 권한에 따라 제공 여부가 달라질 수 있습니다.
-5. 도구 발견 → 논문 목록 → 페이지 PNG가 모델에 보이는지 확인 → 실제 업데이트 요청 → 검증된 뷰 저장 → GUI 열람 순서로 확인합니다. 실패 단계는 그대로 보고하고 텍스트만 보고 시각 검증을 완료했다고 기록하지 않습니다.
-
-Pairper 자체는 OpenAI API 키나 상시 AI 호출 엔진을 사용하지 않습니다. 위 키는 선택적 터널 클라이언트용입니다.
+TextRun의 `join`은 한 run 내부의 `space`/`none`/`newline`/`dehyphenate` 정책입니다. 서로 다른 run 경계에는 `before: auto|none|space|newline`을 지정할 수 있습니다. 기본 `auto`는 원래 공백과 문장부호, 원문 좌표를 사용합니다. 의도적인 단어 결합·하이픈 제거는 해당 조각들을 하나의 run으로 묶어 정책을 지정하고 이력을 확인하세요.

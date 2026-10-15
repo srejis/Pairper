@@ -1,4 +1,5 @@
 import base64
+import os
 import sqlite3
 from functools import wraps
 from typing import Any
@@ -39,7 +40,22 @@ def create_server(library: Library | None = None):
             @wraps(function)
             def guarded(*args, **kwargs):
                 try:
-                    return function(*args, **kwargs)
+                    result = function(*args, **kwargs)
+                    if os.environ.get("PAIRPER_TUNNEL_PROCESS") == "1":
+                        from pairper.storage.library import now, write_json
+                        from pairper.tunnel.config import project_root
+
+                        runtime = project_root() / ".pairper"
+                        if runtime.is_dir():
+                            try:
+                                write_json(
+                                    runtime / "tool-call.json",
+                                    {"tool": function.__name__, "at": now()},
+                                )
+                            except OSError:
+                                # Audit metadata must never turn an already-committed write into an error.
+                                pass
+                    return result
                 except (ValueError, OSError, sqlite3.DatabaseError) as exc:
                     raise ToolError(str(exc)) from exc
 

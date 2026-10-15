@@ -12,7 +12,7 @@ os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--disable-gpu")
 import pymupdf
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QFileDialog
 
 from pairper.document.models import Block, Cell, Content, MathRun, Region, TextRun
 from pairper.storage.library import Library
@@ -108,6 +108,11 @@ def main():
     app = QApplication(sys.argv[:1])
     app.setFont(QFont("Malgun Gothic", 10))
     window = MainWindow(library)
+    # Exercise the native chooser -> restricted bridge -> real importer without user input.
+    original_chooser = QFileDialog.getOpenFileNames
+    QFileDialog.getOpenFileNames = staticmethod(
+        lambda *args, **kwargs: ([str(path)], "PDF (*.pdf)")
+    )
     window.show()
     result = {"passed": False}
 
@@ -123,12 +128,14 @@ def main():
 
     def check():
         js = """JSON.stringify({ready:document.documentElement.dataset.readerReady,
-        fallbacks:document.documentElement.dataset.mathFallbacks,
-        blocks:document.querySelectorAll('section.block').length,
+        fallbacks:String(document.querySelectorAll('.math-fallback').length),
+        blocks:document.querySelectorAll('section.document-block').length,
         katex:document.querySelectorAll('.katex').length,
         tables:document.querySelectorAll('table').length,
         colspan:document.querySelector('th')?.colSpan,
         broken:Array.from(document.images).filter(i=>!i.complete||!i.naturalWidth).length,
+        imported:document.querySelector('footer')?.textContent?.includes('1개 등록 확인'),
+        notice:document.querySelector('footer')?.textContent,
         text:document.querySelector('main')?.innerText})"""
         window.reader.page().runJavaScript(js, finish)
 
@@ -143,21 +150,55 @@ def main():
             and data.get("tables") == 1
             and data.get("colspan") == 2
             and data.get("broken") == 0
+            and data.get("imported") is True
         )
         window.grab().save(str(root / "window.png"))
         (root / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), "utf-8")
         print(json.dumps({k: v for k, v in result.items() if k != "text"}))
-        window.reader.page().runJavaScript("window.scrollTo(0,650)")
+        window.reader.page().runJavaScript("document.querySelector('.reader').scrollTo(0,650)")
         QTimer.singleShot(300, finish_capture)
 
     def finish_capture():
         window.grab().save(str(root / "equations.png"))
+        QFileDialog.getOpenFileNames = original_chooser
+        # A second shell against the same SQLite library must reopen the existing view.
+        app.setQuitOnLastWindowClosed(False)
         window.close()
+        nonlocal restarted
+        restarted = MainWindow(library)
+        restarted.show()
+        QTimer.singleShot(
+            3000,
+            lambda: restarted.reader.page().runJavaScript(
+                "document.querySelectorAll('.document-block').length", finish_restart
+            ),
+        )
+
+    def finish_restart(count):
+        result["restart_blocks"] = count
+        result["passed"] = result["passed"] and count == 14
+        (root / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), "utf-8")
+        print(json.dumps({"restart_blocks": count, "passed": result["passed"]}))
+        restarted.close()
         app.exit(0 if result["passed"] else 1)
 
-    QTimer.singleShot(600, publish)
-    QTimer.singleShot(7000, check)
-    QTimer.singleShot(20000, lambda: app.exit(2))
+    restarted = None
+
+    def click_import():
+        window.reader.page().runJavaScript(
+            "(() => {const b=document.querySelector('.primary');if(!b)return false;b.click();return true;})()",
+            import_clicked,
+        )
+
+    def import_clicked(clicked):
+        if clicked:
+            QTimer.singleShot(1500, publish)
+            QTimer.singleShot(7500, check)
+        else:
+            QTimer.singleShot(200, click_import)
+
+    QTimer.singleShot(1000, click_import)
+    QTimer.singleShot(30000, lambda: app.exit(2))
     return app.exec()
 
 
