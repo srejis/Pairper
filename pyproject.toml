@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pairper"
+version = "0.1.0"
+description = "Source-faithful, local-first academic paper reader"
+requires-python = ">=3.11"
+dependencies = ["PySide6>=6.8,<7", "PyMuPDF>=1.25,<2", "pydantic>=2.10,<3", "platformdirs>=4,<5", "mcp==2.3.0"]
+
+[project.scripts]
+pairper = "pairper.app.main:main"
+pairper-mcp = "pairper.mcp.server:main"
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "pytest-asyncio>=1,<2", "ruff>=0.12"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "B", "UP"]
+
