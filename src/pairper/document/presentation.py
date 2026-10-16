@@ -1,15 +1,18 @@
 """Resolve source references in Python. The UI receives only display data and asset URLs."""
 
+from pairper.document.comparison import region_descriptors
 from pairper.document.models import Document, MathRun
 from pairper.document.text import resolved_runs
 
 DISPLAY_SCHEMA_VERSION = "1.0"
 
 
-def display_document(library, paper_id):
+def load_document(library, paper_id, view_id=None):
     paper = library.paper(paper_id)
     if not library.valid_view(paper):
         raise ValueError("유효한 저장 문서가 없습니다.")
+    if view_id is not None and paper["current_view_id"] != view_id:
+        raise ValueError("저장 문서가 변경되었습니다. 다시 열어 주세요.")
     with library.connect() as con:
         view = con.execute(
             "SELECT json_path FROM views WHERE id=?", (paper["current_view_id"],)
@@ -17,6 +20,11 @@ def display_document(library, paper_id):
     document = Document.model_validate_json(library.managed(view["json_path"]).read_text("utf-8"))
     if document.paper_id != paper_id or document.source_sha256 != paper["sha256"]:
         raise ValueError("문서와 원본의 연결이 일치하지 않습니다.")
+    return paper, document
+
+
+def display_document(library, paper_id):
+    paper, document = load_document(library, paper_id)
     source = library.source(paper_id)
     spans = {s["id"]: {**s, "page": p["page"]} for p in source["pages"] for s in p["spans"]}
     audit = []
@@ -43,6 +51,7 @@ def display_document(library, paper_id):
 
     blocks = []
     for block in sorted(document.blocks, key=lambda b: b.order):
+        regions, source_error = region_descriptors(block, source, spans)
         c = block.content
         content = {
             "level": c.level,
@@ -72,6 +81,8 @@ def display_document(library, paper_id):
                 "type": block.type,
                 "order": block.order,
                 "validation_status": block.validation_status,
+                "source_regions": regions,
+                "source_error": source_error,
                 "content": content,
                 "source_trace": [
                     {

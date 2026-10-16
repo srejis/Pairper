@@ -47,7 +47,7 @@ export const Equation = ({ content }: Props) => <div className="equation-scroll"
   <MathContent latex={content.latex} verified={content.source_verified} image={content.image_url} display />
   {content.number ? <span className="equation-number">{content.number}</span> : null}
 </div>;
-export const Figure = ({ content }: Props) => <figure aria-describedby={content.caption_id ?? undefined}><SourceImage url={content.image_url} /></figure>;
+export const Figure = ({ content }: Props) => <figure aria-describedby={content.caption_id ? `block-${content.caption_id}` : undefined}><SourceImage url={content.image_url} /></figure>;
 export function Table({ content }: Props) {
   if (!content.source_verified || !content.cells.length) return <SourceImage url={content.image_url} />;
   const rows = new Map<number, typeof content.cells>();
@@ -73,14 +73,19 @@ const renderers: Record<BlockType, ComponentType<Props>> = {
   equation: Equation, figure: Figure, table: Table, caption: Caption, footnote: Footnote,
   reference: Reference, source_region: SourceRegion,
 };
-export function BlockView({ block }: { block: DocumentBlock }) {
+export function BlockView({ block, onInspect, selected = false }: {
+  block: DocumentBlock; onInspect?(block: DocumentBlock): void; selected?: boolean;
+}) {
   const Component = renderers[block.type];
-  return <section id={block.id} className={`document-block ${block.type}`} data-block-type={block.type}>
+  return <section id={`block-${block.id}`} tabIndex={onInspect ? 0 : undefined} aria-label={onInspect ? `${block.type} 블록` : undefined}
+    className={`document-block ${block.type} ${selected ? 'source-selected' : ''}`} data-block-type={block.type} data-block-id={block.id}>
     <div className="block-body"><Component content={block.content} /></div>
-    {block.content.image_url ? <details className="source-comparison">
+    {onInspect && block.source_regions?.length ? <button className="inspect-button" onClick={() => onInspect(block)}>원본 확인</button> : null}
+    {onInspect && block.source_error ? <small className="source-error">{block.source_error}</small> : null}
+    {!onInspect && block.content.image_url ? <details className="source-comparison">
       <summary>원본 대조</summary><SourceImage url={block.content.image_url} />
     </details> : null}
-    {block.source_trace.length ? <details className="source-trace"><summary>원문 참조</summary>
+    {!onInspect && block.source_trace.length ? <details className="source-trace"><summary>원문 참조</summary>
       {block.source_trace.map(ref => <p key={ref.id}><small>원본 {ref.page}쪽 · {ref.id}</small><br />{ref.text}</p>)}
     </details> : null}
   </section>;

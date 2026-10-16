@@ -14,6 +14,8 @@ interface QtBridge {
   reconnectTunnel(id: string): void;
   autostartStatus(id: string): void;
   setAutostart(id: string, enabled: boolean): void;
+  copyUpdateRequest(id: string, paperId: string): void;
+  sourceRegion(id: string, paperId: string, viewId: string, blockId: string, regionId: string): void;
 }
 declare global {
   interface Window {
@@ -44,17 +46,24 @@ export function connectBridge(): Promise<PairperApi> {
           else item.reject(new Error(result.error));
         } catch { item.reject(new Error('데스크톱 응답 형식을 확인할 수 없습니다.')); }
       });
-      function call<T>(method: 'listPapers' | 'getDocument' | 'connectionStatus' | 'importPdfs' | 'openDiagnostics' | 'reconnectTunnel' | 'autostartStatus' | 'setAutostart', argument?: string | boolean): Promise<T> {
+      function call<T>(method: 'listPapers' | 'getDocument' | 'connectionStatus' | 'importPdfs' | 'openDiagnostics' | 'reconnectTunnel' | 'autostartStatus' | 'setAutostart' | 'sourceRegion' | 'copyUpdateRequest', argument?: string | boolean | string[]): Promise<T> {
         const id = `${method === 'importPdfs' ? 'import' : 'request'}_${++sequence}`;
         return new Promise((res, rej) => {
           const timer = setTimeout(() => { pending.delete(id); rej(new Error('데스크톱 응답이 지연되고 있습니다.')); }, method === 'importPdfs' ? 600000 : 60000);
           pending.set(id, { resolve: data => res(data as T), reject: rej, timer });
           if (method === 'getDocument') bridge.getDocument(id, argument as string);
+          else if (method === 'copyUpdateRequest') bridge.copyUpdateRequest(id, argument as string);
           else if (method === 'setAutostart') bridge.setAutostart(id, argument as boolean);
+          else if (method === 'sourceRegion') {
+            const [paperId, viewId, blockId, regionId] = argument as string[];
+            bridge.sourceRegion(id, paperId, viewId, blockId, regionId);
+          }
           else bridge[method](id);
         });
       }
       resolve({
+        copyUpdateRequest: paperId => call('copyUpdateRequest', paperId),
+        sourceRegion: (paperId, viewId, blockId, regionId) => call('sourceRegion', [paperId, viewId, blockId, regionId]),
         autostartStatus: () => call('autostartStatus'),
         setAutostart: enabled => call('setAutostart', enabled),
         listPapers: () => call('listPapers'),

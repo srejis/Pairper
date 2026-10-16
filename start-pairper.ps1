@@ -10,5 +10,7 @@ $pairperArguments = @('-m','pairper.app.main')
 if ($LegacyUi) { $pairperArguments += '--legacy-ui' }
 if ($DevUi) { $pairperArguments += @('--dev-ui', $DevUi) }
 if ($Tray) { $pairperArguments += '--tray' }
-$pairperProcess = Start-Process -FilePath $pairperPython -ArgumentList $pairperArguments -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -Wait -PassThru
+# pythonw has no console. Let Qt control the interactive window; Hidden can suppress its first show.
+# --tray still prevents the Qt window from opening until the user restores it.
+$pairperProcess = Start-Process -FilePath $pairperPython -ArgumentList $pairperArguments -WorkingDirectory $PSScriptRoot -WindowStyle Normal -Wait -PassThru
 exit $pairperProcess.ExitCode

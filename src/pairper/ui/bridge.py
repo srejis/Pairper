@@ -2,10 +2,11 @@ import json
 import re
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from pairper.app.autostart import autostart_status, set_autostart
+from pairper.document.comparison import comparison_image
 from pairper.document.presentation import display_document
 from pairper.tunnel.config import project_root
 from pairper.tunnel.runtime import public_status
@@ -90,7 +91,7 @@ class FrontendBridge(QObject):
             self.dispatch("_poll", self.paper_list)
 
     def paper_list(self):
-        return [
+        papers = [
             {
                 key: p[key]
                 for key in (
@@ -101,14 +102,53 @@ class FrontendBridge(QObject):
                     "status",
                     "has_view",
                     "current_view_id",
+                    "created_at",
                 )
             }
             for p in self.library.list_papers()
         ]
+        with self.library.connect() as con:
+            for paper in papers:
+                original = self.library.paper(paper["id"])
+                metadata = json.loads(original["metadata"])
+                paper["title"] = metadata.get("title") or paper["filename"]
+                paper["original_available"] = self.library.managed(
+                    original["original_path"]
+                ).is_file()
+                job = con.execute(
+                    "SELECT error FROM jobs WHERE paper_id=? ORDER BY updated_at DESC LIMIT 1",
+                    (paper["id"],),
+                ).fetchone()
+                paper["error"] = job["error"][:300] if job and job["error"] else None
+        return papers
+
+    @Slot(str, str, str, str, str)
+    def sourceRegion(self, request_id, paper_id, view_id, block_id, region_id):
+        self.dispatch(
+            request_id,
+            lambda: comparison_image(self.library, paper_id, view_id, block_id, region_id),
+        )
 
     @Slot(str)
     def listPapers(self, request_id):
         self.dispatch(request_id, self.paper_list)
+
+    @Slot(str, str)
+    def copyUpdateRequest(self, request_id, paper_id):
+        if not re.fullmatch(r"[a-zA-Z0-9_-]{1,100}", request_id):
+            return
+        try:
+            if not re.fullmatch(r"[a-f0-9]{32}", paper_id):
+                raise ValueError("Invalid paper ID")
+            paper = self.library.paper(paper_id)
+            title = json.loads(paper["metadata"]).get("title") or paper["filename"]
+            QGuiApplication.clipboard().setText(
+                f"Pairper 논문 업데이트해 줘. 대상 논문: {title} (paper_id: {paper_id})"
+            )
+            result = {"ok": True, "data": {"copied": True}}
+        except Exception:
+            result = {"ok": False, "error": "요청 문구를 복사하지 못했습니다."}
+        self.reply.emit(request_id, json.dumps(result, ensure_ascii=False))
 
     @Slot(str, str)
     def getDocument(self, request_id, paper_id):

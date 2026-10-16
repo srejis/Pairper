@@ -1,0 +1,12 @@
+@font-face{font-family:Inter;src:url('../assets/fonts/InterVariable.woff2') format('woff2');font-weight:100 900;font-display:swap}
+@font-face{font-family:Pretendard;src:url('../assets/fonts/PretendardVariable.woff2') format('woff2');font-weight:100 900;font-display:swap}
+:root{
+  --bg:#F5F6F5;--reader-bg:#EDF0EE;--surface:#FFFFFF;--text:#293630;
+  --muted:#738078;--line:#E1E6E2;--brand:#285745;--accent:#E7F1EA;
+  --warning:#927044;--danger:#A2483B;--radius:7px;--space-1:4px;--space-2:8px;
+  --space-3:12px;--space-4:16px;--space-5:24px;--space-6:32px;--space-7:36px;
+  --header-height:60px;--toolbar-height:56px;--content-width:1040px;--document-width:860px;
+  --document-padding:72px;--panel-width:320px;--reader-font-size:17px;
+  --font-ui:Inter,Pretendard,'Malgun Gothic',system-ui,sans-serif;
+  font-family:var(--font-ui);color:var(--text);background:var(--bg);font-synthesis:none;color-scheme:light;
+}
