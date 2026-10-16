@@ -272,6 +272,9 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("렌더링 결과를 확인할 수 없습니다.")
 
     def closeEvent(self, event):
+        handler = getattr(self, "close_handler", None)
+        if handler and handler(event):
+            return
         self.timer.stop()
         self.reader.setPage(QWebEnginePage(self.reader))
         self.placeholder.unlink(missing_ok=True)

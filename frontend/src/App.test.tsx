@@ -19,6 +19,8 @@ it('updates a pending paper when MCP publishes a view and imports through the de
       checked_at:null,last_healthy_at:null,healthy:true,ready:true,admin_url:null,chatgpt_verified:false })),
     importPdfs: vi.fn(async () => ({imported:1,failed:0})),
     openDiagnostics: vi.fn(),
+    reconnectTunnel: vi.fn(async () => ({state:'reconnecting',message:'MCP 터널 다시 연결 중',
+      checked_at:null,last_healthy_at:null,healthy:false,ready:false,admin_url:null,chatgpt_verified:false})),
     onLibraryChanged: vi.fn(listener => { changed = listener; return () => {}; }),
   };
   render(<App api={api} />);
@@ -29,4 +31,7 @@ it('updates a pending paper when MCP publishes a view and imports through the de
   fireEvent.click(screen.getByRole('button',{name:'+ PDF 추가'}));
   await waitFor(() => expect(api.importPdfs).toHaveBeenCalledTimes(1));
   expect(await screen.findByText('1개 등록 확인 · 0개 실패')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'다시 연결'}));
+  expect(await screen.findByText('MCP 터널 다시 연결 중')).toBeInTheDocument();
+  expect(api.reconnectTunnel).toHaveBeenCalledTimes(1);
 });

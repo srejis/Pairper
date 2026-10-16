@@ -2,11 +2,8 @@ import argparse
 import ctypes
 import json
 import os
-import queue
-import re
 import subprocess
 import sys
-import threading
 import time
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -66,6 +63,38 @@ def probe(root):
     return {**values, "admin_url": f"{url}/ui"}
 
 
+def _safe_time(value):
+    try:
+        return datetime.fromisoformat(value).isoformat()
+    except (ValueError, TypeError):
+        return None
+
+
+def tool_audit(root):
+    result = {}
+    try:
+        audit = json.loads((root / ".pairper/tool-call.json").read_text("utf-8"))
+        tools = {
+            "list_papers",
+            "list_pending_papers",
+            "get_paper_manifest",
+            "get_page_content",
+            "get_page_image",
+            "get_region_image",
+            "begin_view_build",
+            "append_document_blocks",
+            "validate_view_build",
+            "finalize_view_build",
+            "get_build_report",
+        }
+        if audit["tool"] in tools:
+            result["last_tunnel_tool_at"] = _safe_time(audit["at"])
+            result["last_tunnel_tool"] = audit["tool"]
+    except (OSError, ValueError, KeyError):
+        pass
+    return result
+
+
 def public_status(root: Path | None = None):
     root = root or project_root()
     try:
@@ -85,6 +114,10 @@ def public_status(root: Path | None = None):
         "connecting": "터널 연결 시도 중",
         "runtime_ready": "로컬 터널 런타임 준비 완료",
         "disconnected": "터널 연결이 끊겼습니다.",
+        "connected": "로컬 MCP 터널 준비 완료",
+        "reconnecting": "MCP 터널 다시 연결 중",
+        "error": "MCP 설정 또는 실행 상태를 확인하세요.",
+        "stopped": "MCP 연결이 종료되었습니다.",
     }
     state = data.get("state") if data.get("state") in messages else "configuration_error"
 
@@ -100,41 +133,27 @@ def public_status(root: Path | None = None):
         "checked_at": safe_time(data.get("checked_at")),
         "last_healthy_at": safe_time(data.get("last_healthy_at")),
     }
-    live = probe(root)
+    live = (
+        {"healthy": False, "ready": False, "admin_url": None}
+        if data.get("state") == "stopped"
+        else probe(root)
+    )
     if data.get("state") == "authentication_failed":
         live["ready"] = False
     allowed.update(live)
     if live["ready"] and data.get("state") != "authentication_failed":
         allowed.update(
-            state="runtime_ready", message="로컬 터널 런타임 준비 완료 · ChatGPT 호출 미확인"
+            state="connected" if data.get("state") == "connected" else "runtime_ready",
+            message="로컬 터널 런타임 준비 완료 · 실제 호출은 별도 기록",
         )
-    elif data.get("state") in {"runtime_ready", "connecting"}:
+    elif data.get("state") in {"runtime_ready", "connecting", "connected"}:
         try:
             recent = time.time() - state_path(root).stat().st_mtime < 15
         except OSError:
             recent = False
-        if not recent or data.get("state") == "runtime_ready":
+        if not recent or data.get("state") in {"runtime_ready", "connected"}:
             allowed.update(state="disconnected", message="터널 연결이 끊겼습니다.")
-    try:
-        audit = json.loads((root / ".pairper/tool-call.json").read_text("utf-8"))
-        tools = {
-            "list_papers",
-            "list_pending_papers",
-            "get_paper_manifest",
-            "get_page_content",
-            "get_page_image",
-            "get_region_image",
-            "begin_view_build",
-            "append_document_blocks",
-            "validate_view_build",
-            "finalize_view_build",
-            "get_build_report",
-        }
-        if audit["tool"] in tools:
-            allowed["last_tunnel_tool_at"] = safe_time(audit["at"])
-            allowed["last_tunnel_tool"] = audit["tool"]
-    except (OSError, ValueError, KeyError):
-        pass
+    allowed.update(tool_audit(root))
     allowed["chatgpt_verified"] = False  # Local health/tool audit cannot identify caller product.
     return allowed
 
@@ -255,121 +274,46 @@ def doctor(config):
 
 
 def run(config):
-    prepare_profile(config)
-    with runtime_lock(config.runtime):
-        (config.runtime / "health.url").unlink(missing_ok=True)
-        status = {
-            "state": "connecting",
-            "message": "터널 연결 시도 중",
-            "checked_at": timestamp(),
-            "last_healthy_at": None,
-        }
-        write_json(state_path(config.root), status)
-        flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-        process = subprocess.Popen(
-            [str(config.executable), "run", "--config", str(config.profile)],
-            cwd=config.root,
-            env=config.environment(),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            creationflags=flags,
-        )
-        write_json(
-            config.runtime / "process.json", {"runner_pid": os.getpid(), "tunnel_pid": process.pid}
-        )
-        job_handle = None
-        try:
-            job_handle = kill_on_parent_exit(process)
-            lines = queue.Queue(maxsize=1000)
+    """Diagnostic standalone mode. The desktop uses TunnelSupervisor instead."""
+    from pairper.tunnel.session import TunnelSession
 
-            def consume():
-                for line in process.stdout:
-                    safe = redact(line, config.values.values())
-                    try:
-                        lines.put(safe, timeout=1)
-                    except queue.Full:
-                        pass
-
-            threading.Thread(target=consume, daemon=True).start()
-            auth_failed = False
-            last_check = 0
-            log_path = config.runtime / "tunnel.log"
-            if log_path.exists() and log_path.stat().st_size > 2_000_000:
-                os.replace(log_path, config.runtime / "tunnel.previous.log")
-            with log_path.open("a", encoding="utf-8") as log:
-                while process.poll() is None:
-                    try:
-                        line = lines.get(timeout=0.2)
-                        log.write(line)
-                        log.flush()
-                        if any(
-                            term in line.lower()
-                            for term in (
-                                "unauthorized",
-                                '"status":401',
-                                '"status":403',
-                                "invalid_api_key",
-                                "authentication failed",
-                                "permission_denied",
-                                "status=401",
-                                "status=403",
-                            )
-                        ):
-                            auth_failed = True
-                        if re.search(
-                            r"(?:status(?:_code)?|http)[\s\"':=_-]*(?:401|403)\b", line, re.I
-                        ):
-                            auth_failed = True
-                    except queue.Empty:
-                        pass
-                    if time.monotonic() - last_check > 3:
-                        live = probe(config.root)
-                        status["checked_at"] = timestamp()
-                        if auth_failed:
-                            status.update(
-                                state="authentication_failed",
-                                message="터널 인증 또는 권한을 확인하세요.",
-                            )
-                        elif live["ready"]:
-                            status.update(
-                                state="runtime_ready",
-                                message="로컬 터널 런타임 준비 완료",
-                                last_healthy_at=timestamp(),
-                            )
-                        else:
-                            status.update(state="connecting", message="터널 연결 시도 중")
-                        write_json(state_path(config.root), status)
-                        last_check = time.monotonic()
-                    if auth_failed:
-                        status.update(
-                            state="authentication_failed",
-                            message="터널 인증 또는 권한을 확인하세요.",
-                            checked_at=timestamp(),
-                        )
-                        write_json(state_path(config.root), status)
-                        process.terminate()
-                        process.wait(timeout=10)
-                        # Exit success: task scheduler must not endlessly retry bad credentials.
-                        return 0
-            status.update(
-                state="disconnected",
-                message="터널 프로세스가 종료되었습니다.",
-                checked_at=timestamp(),
+    session = TunnelSession(config)
+    last_check = 0
+    try:
+        session.start()
+        while session.alive():
+            session.drain()
+            if session.permanent_error:
+                break
+            if time.monotonic() - last_check >= 10:
+                live = session.poll()
+                write_json(
+                    state_path(config.root),
+                    {
+                        "state": "runtime_ready" if live["ready"] else "connecting",
+                        "checked_at": timestamp(),
+                        "last_healthy_at": timestamp() if live["ready"] else None,
+                    },
+                )
+                last_check = time.monotonic()
+            time.sleep(0.2)
+        session.poll()
+        if session.permanent_error:
+            write_json(
+                state_path(config.root),
+                {
+                    "state": "authentication_failed"
+                    if session.permanent_error == "authentication_failed"
+                    else "error",
+                    "checked_at": timestamp(),
+                },
             )
-            write_json(state_path(config.root), status)
-            return process.returncode or 1
-        finally:
-            if process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-            if job_handle:
-                ctypes.windll.kernel32.CloseHandle(ctypes.c_void_p(job_handle))
+            return 0
+        return 1
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        session.stop()
 
 
 def main():

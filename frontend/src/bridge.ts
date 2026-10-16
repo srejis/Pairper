@@ -5,12 +5,13 @@ interface QtSignal {
   disconnect(fn: (...args: string[]) => void): void;
 }
 interface QtBridge {
-  reply: QtSignal; libraryChanged: QtSignal;
+  reply: QtSignal; libraryChanged: QtSignal; connectionChanged: QtSignal;
   listPapers(id: string): void;
   getDocument(id: string, paperId: string): void;
   connectionStatus(id: string): void;
   importPdfs(id: string): void;
   openDiagnostics(id: string): void;
+  reconnectTunnel(id: string): void;
 }
 declare global {
   interface Window {
@@ -41,7 +42,7 @@ export function connectBridge(): Promise<PairperApi> {
           else item.reject(new Error(result.error));
         } catch { item.reject(new Error('데스크톱 응답 형식을 확인할 수 없습니다.')); }
       });
-      function call<T>(method: 'listPapers' | 'getDocument' | 'connectionStatus' | 'importPdfs' | 'openDiagnostics', argument?: string): Promise<T> {
+      function call<T>(method: 'listPapers' | 'getDocument' | 'connectionStatus' | 'importPdfs' | 'openDiagnostics' | 'reconnectTunnel', argument?: string): Promise<T> {
         const id = `${method === 'importPdfs' ? 'import' : 'request'}_${++sequence}`;
         return new Promise((res, rej) => {
           const timer = setTimeout(() => { pending.delete(id); rej(new Error('데스크톱 응답이 지연되고 있습니다.')); }, method === 'importPdfs' ? 600000 : 60000);
@@ -56,6 +57,11 @@ export function connectBridge(): Promise<PairperApi> {
         connectionStatus: () => call('connectionStatus'),
         importPdfs: () => call('importPdfs'),
         openDiagnostics: () => call('openDiagnostics'),
+        reconnectTunnel: () => call('reconnectTunnel'),
+        onConnectionChanged: listener => {
+          bridge.connectionChanged.connect(listener);
+          return () => bridge.connectionChanged.disconnect(listener);
+        },
         onLibraryChanged: listener => {
           bridge.libraryChanged.connect(listener);
           return () => bridge.libraryChanged.disconnect(listener);

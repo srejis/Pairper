@@ -44,6 +44,7 @@ class TaskReceiver(QObject):
 class FrontendBridge(QObject):
     reply = Signal(str, str)
     libraryChanged = Signal()
+    connectionChanged = Signal()
 
     def __init__(self, library, window, root=None):
         super().__init__(window)
@@ -54,6 +55,7 @@ class FrontendBridge(QObject):
         self.signature = None
         self.polling = False
         self.importing = False
+        self.supervisor = None
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.poll)
         self.timer.start(1500)
@@ -118,7 +120,27 @@ class FrontendBridge(QObject):
 
     @Slot(str)
     def connectionStatus(self, request_id):
-        self.dispatch(request_id, lambda: public_status(self.root))
+        self.dispatch(request_id, self.connection_snapshot)
+
+    def attach_supervisor(self, supervisor):
+        self.supervisor = supervisor
+
+    def connection_snapshot(self):
+        return self.supervisor.snapshot() if self.supervisor else public_status(self.root)
+
+    @Slot(str)
+    def reconnectTunnel(self, request_id):
+        if not self.supervisor:
+            self.reply.emit(
+                request_id,
+                json.dumps(
+                    {"ok": False, "error": "앱 연결 관리자가 실행되지 않았습니다."},
+                    ensure_ascii=False,
+                ),
+            )
+            return
+        self.supervisor.reconnect()
+        self.dispatch(request_id, self.connection_snapshot)
 
     @Slot(str)
     def importPdfs(self, request_id):
@@ -144,9 +166,9 @@ class FrontendBridge(QObject):
 
     @Slot(str)
     def openDiagnostics(self, request_id):
-        self.dispatch(request_id, lambda: public_status(self.root))
+        self.dispatch(request_id, self.connection_snapshot)
         # Fixed native operation; the frontend cannot supply paths, URLs or commands.
-        status = public_status(self.root)
+        status = self.connection_snapshot()
         if status.get("admin_url") and status.get("healthy"):
             QDesktopServices.openUrl(QUrl(status["admin_url"]))
         else:

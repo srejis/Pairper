@@ -24,15 +24,16 @@ uv run pairper
 .\start-pairper.ps1 -SoftwareRendering
 ```
 
-터널은 GUI와 별도로 실행합니다. 기존 `.env`는 수정하지 않고 재사용합니다.
+Pairper 앱이 터널을 자동 연결하고 관리합니다. 기존 `.env`는 수정하지 않고 재사용하며, 터널 콘솔을 따로 켤 필요가 없습니다. X 버튼은 트레이로 숨기고, 완전히 종료하려면 트레이의 **Pairper 종료**를 선택합니다. 앱을 다시 실행하면 기존 창이 복원됩니다.
 
 ```powershell
-.\test-pairper-tunnel.ps1
-.\start-pairper-tunnel.ps1
-# 다른 콘솔에서 /healthz와 /readyz 상태 확인
+.\start-pairper.ps1 -Tray    # 창을 띄우지 않고 트레이에서 시작
+# 필요할 때 상태 확인
 .\test-pairper-tunnel.ps1 -StatusOnly
-# 수동 연결 검증 후 사용자가 한 번 실행하면 로그인 시 자동 시작 등록
+# 사용자가 한 번 실행하면 로그인 시 Pairper 앱 자동 시작 등록
 .\install-pairper-autostart.ps1
+# 기존 터널 전용 작업이 있다면 전환을 명시적으로 승인
+.\install-pairper-autostart.ps1 -MigrateLegacyTunnelTask
 # 등록 해제
 .\uninstall-pairper-autostart.ps1
 ```
@@ -60,9 +61,11 @@ uv run pairper --import-pdf 'C:\papers\paper.pdf'
 
 | 모듈 | 역할 |
 | --- | --- |
-| `app/`, `ui/` | Qt 셸, 원본 ID만 받는 비동기 WebChannel, 네이티브 파일 선택 |
+| `app/controller.py`, `instance.py` | 트레이, 단일 실행 잠금/IPC, 앱 및 연결 종료 순서 |
+| `ui/` | Qt 셸, 제한된 비동기 WebChannel, 네이티브 파일 선택 |
 | `frontend/src/` | React + TypeScript 앱 셸, 라이브러리, 12종 문서 블록 |
-| `tunnel/` | 프로젝트 .env, 터널 프로필, 진단·실행·상태·로그 마스킹 |
+| `tunnel/supervisor.py`, `session.py` | 10초 상태 확인, 자동 재연결, 소유한 프로세스 트리 관리 |
+| `tunnel/config.py`, `runtime.py` | 프로젝트 .env, 프로필, 진단 CLI·안전한 상태·로그 마스킹 |
 | `pdf/source.py` | 영구 보관하는 span ID·문자열·좌표·서식·방향, 이미지/벡터 위치, 영역 렌더링 |
 | `storage/library.py` | SHA-256 중복 방지, SQLite WAL/트랜잭션, 재개 가능한 작업, 원자적 뷰 확정 |
 | `document/models.py` | Pydantic 문서 계약: 12종 블록, 인라인 수식, 병합 셀, 생략 근거 |
@@ -88,7 +91,7 @@ npm run build
 
 UI 통합 검증은 Windows에서 합성 단위 테스트용 PDF로 12종 블록, 수식 성공/실패, 병합 셀, 원본 자산, 실행 중 DB 변경 감지를 확인하고 `tmp/ui-verification/`에 결과와 캡처를 씁니다. 지정된 arXiv 논문의 대체 통합 검증으로 간주하지 않습니다.
 
-최신 검증 범위는 [터널·UI 전환 보고](docs/tunnel-and-ui-report.md)에 정리했습니다. 기존 라이브러리에 `arXiv:2412.15750v1` 13페이지 PDF가 유지되는 것을 확인했으며 현재 뷰 생성 전입니다. 로컬 터널 인증과 readiness는 확인했지만 ChatGPT의 실제 도구 호출 및 실제 논문 재구성은 별도 미검증입니다.
+최신 검증 범위는 [트레이·자동 재연결 보고](docs/tray-supervisor-report.md)에 정리했습니다. 실제 트레이 숨김 중 원격 MCP 목록 조회, 터널 강제 종료 후 자동 복구, 복구 후 원격 목록/페이지 PNG 응답까지 확인했습니다. Windows 로그인 자동 시작 등록 및 재로그인은 사용자 설치·검증 단계로 남겨 두었습니다. 이 검증이 실제 논문 재구성의 품질 검증을 뜻하지는 않습니다.
 
 ## 프론트엔드 개발
 

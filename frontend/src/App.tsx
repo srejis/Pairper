@@ -23,13 +23,18 @@ export function App({ api }: { api: PairperApi }) {
   useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
+    let loading = false;
     async function update() {
+      if (loading || !active) return;
+      loading = true;
       try { const status = await api.connectionStatus(); if (active) setConnection(status); }
       catch { if (active) setConnection(null); }
-      if (active) timer = setTimeout(update, 4000);
+      finally { loading = false; }
     }
-    void update();
-    return () => { active = false; clearTimeout(timer); };
+    function poll() { void update(); timer = setTimeout(poll, 10000); }
+    const unsubscribe = api.onConnectionChanged?.(() => { void update(); });
+    poll();
+    return () => { active = false; clearTimeout(timer); unsubscribe?.(); };
   }, [api]);
   async function importPdfs() {
     setImporting(true);
@@ -46,9 +51,12 @@ export function App({ api }: { api: PairperApi }) {
     <header className="app-header"><div className="brand">Pairper<span>논문을 읽는 새로운 흐름</span></div>
       <div className="header-actions"><div className={`connection ${connection?.ready ? 'ready' : ''}`}>
         <span>{connection?.message ?? 'MCP 상태 확인 중'}</span>
-        {connection?.last_healthy_at ? <small>최근 정상 통신 {new Date(connection.last_healthy_at).toLocaleTimeString('ko-KR')}</small> : null}
+        {connection?.last_healthy_at ? <small>최근 정상 확인 {new Date(connection.last_healthy_at).toLocaleTimeString('ko-KR')}</small> : null}
         {connection?.last_tunnel_tool_at ? <small>터널 도구 호출 {connection.last_tunnel_tool} · ChatGPT 발신은 별도 확인</small> : null}
       </div><button type="button" onClick={() => { void api.openDiagnostics().catch(e => setNotice(e.message)); }}>연결 진단</button>
+      <button type="button" onClick={() => {
+        void api.reconnectTunnel?.().then(setConnection).catch(e => setNotice(e.message));
+      }}>다시 연결</button>
       <button type="button" className="primary" disabled={importing} onClick={() => { void importPdfs(); }}>{importing ? 'PDF 등록 중…' : '+ PDF 추가'}</button></div>
     </header>
     <div className="workspace"><PaperLibrary papers={papers} selected={selected} onSelect={setSelected} />

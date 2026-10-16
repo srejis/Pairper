@@ -9,6 +9,9 @@ def main():
     parser.add_argument("--data-dir", help="Shared library folder (or PAIRPER_DATA_DIR)")
     parser.add_argument("--dev-ui", help="Explicit local Vite URL, e.g. http://127.0.0.1:5173/")
     parser.add_argument("--legacy-ui", action="store_true", help="Use the preserved Python UI")
+    parser.add_argument(
+        "--tray", action="store_true", help="Start in the system tray when available"
+    )
     parser.add_argument("--import-pdf", nargs="+", metavar="PDF", help="Import without opening GUI")
     args = parser.parse_args()
     from pairper.tunnel.config import ConfigurationError, project_root, read_env
@@ -29,6 +32,8 @@ def main():
     from PySide6.QtGui import QFont
     from PySide6.QtWidgets import QApplication
 
+    from pairper.app.controller import ApplicationController
+
     if args.legacy_ui:
         from pairper.ui.legacy_window import MainWindow
     else:
@@ -37,9 +42,19 @@ def main():
     app = QApplication(sys.argv[:1])
     app.setApplicationName("Pairper")
     app.setFont(QFont("Malgun Gothic" if sys.platform == "win32" else "sans-serif", 10))
-    window = MainWindow(library) if args.legacy_ui else MainWindow(library, dev_url=args.dev_ui)
-    window.show()
-    sys.exit(app.exec())
+    factory = (
+        (lambda: MainWindow(library))
+        if args.legacy_ui
+        else (lambda: MainWindow(library, dev_url=args.dev_ui, project=root))
+    )
+    controller = ApplicationController(app, library, root, window_factory=factory)
+    if not controller.start(start_in_tray=args.tray):
+        return
+    code = app.exec()
+    controller.supervisor.stop()
+    if controller.supervisor.thread:
+        controller.supervisor.thread.join(timeout=25)
+    sys.exit(code)
 
 
 if __name__ == "__main__":

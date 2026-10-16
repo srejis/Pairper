@@ -30,6 +30,7 @@ export interface ConnectionStatus {
   state: string; message: string; checked_at: string | null; last_healthy_at: string | null;
   healthy: boolean; ready: boolean; admin_url: string | null; chatgpt_verified: boolean;
   last_tunnel_tool_at?: string; last_tunnel_tool?: string;
+  changed_at?: string; retry_in_seconds?: number | null;
 }
 export interface PairperApi {
   listPapers(): Promise<Paper[]>;
@@ -37,5 +38,7 @@ export interface PairperApi {
   connectionStatus(): Promise<ConnectionStatus>;
   importPdfs(): Promise<{ imported: number; failed: number }>;
   openDiagnostics(): Promise<ConnectionStatus>;
+  reconnectTunnel?(): Promise<ConnectionStatus>;
+  onConnectionChanged?(listener: () => void): () => void;
   onLibraryChanged(listener: () => void): () => void;
 }

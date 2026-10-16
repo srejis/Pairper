@@ -110,3 +110,35 @@ def test_runtime_lock_prevents_duplicates(tmp_path):
         with pytest.raises(ConfigurationError):
             with runtime_lock(tmp_path):
                 pass
+
+
+def test_status_preserves_supervisor_state(tmp_path, monkeypatch):
+    from pairper.tunnel import runtime
+
+    directory = tmp_path / ".pairper"
+    directory.mkdir()
+    path = directory / "status.json"
+    path.write_text(json.dumps({"state": "connected"}), "utf-8")
+    monkeypatch.setattr(
+        runtime, "probe", lambda root: {"ready": True, "healthy": True, "admin_url": None}
+    )
+    assert runtime.public_status(tmp_path)["state"] == "connected"
+    monkeypatch.setattr(
+        runtime, "probe", lambda root: {"ready": False, "healthy": False, "admin_url": None}
+    )
+    assert runtime.public_status(tmp_path)["state"] == "disconnected"
+
+
+def test_stopped_status_does_not_probe_a_stale_port(tmp_path, monkeypatch):
+    from pairper.tunnel import runtime
+
+    directory = tmp_path / ".pairper"
+    directory.mkdir()
+    (directory / "status.json").write_text(json.dumps({"state": "stopped"}), "utf-8")
+
+    def unexpected_probe(root):
+        raise AssertionError("A stopped tunnel must not trust a stale local port")
+
+    monkeypatch.setattr(runtime, "probe", unexpected_probe)
+    status = runtime.public_status(tmp_path)
+    assert status["state"] == "stopped" and not status["ready"]

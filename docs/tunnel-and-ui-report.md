@@ -1,5 +1,7 @@
 # Secure MCP Tunnel 및 TypeScript UI 전환 결과
 
+이 문서는 이전 전환 작업의 기록입니다. 현재는 앱이 트레이와 터널을 함께 관리합니다. 최신 구조와 검증 결과는 [트레이·자동 재연결 보고](tray-supervisor-report.md)를 확인하세요.
+
 작업일: 2026-10-15~16 (Asia/Seoul). 사용자 지시문 원본은 `프롬프트/2026-10-15_Secure-MCP-Tunnel_및_TypeScript-UI_수정지시서.md`에 UTF-8 Markdown으로 보관했습니다.
 
 ## 구현한 변경

@@ -86,6 +86,7 @@ def protect_local(path: Path):
         env={**os.environ, "PAIRPER_ACL_TARGET": str(path)},
         capture_output=True,
         creationflags=subprocess.CREATE_NO_WINDOW,
+        timeout=15,
     )
     if result.returncode:
         raise ConfigurationError("로컬 설정 파일의 현재 사용자 접근 권한 제한에 실패했습니다.")
@@ -184,7 +185,8 @@ def load_config(
     config = TunnelConfig(root, values, executable)
     if not config.python.is_file():
         raise ConfigurationError(
-            "프로젝트 .venv의 Python이 없습니다. uv sync --locked를 실행하세요."
+            "프로젝트 .venv의 Python이 없습니다. uv sync --locked를 실행하세요.",
+            "executable_missing",
         )
     config.runtime.mkdir(exist_ok=True)
     if secure:

@@ -107,6 +107,12 @@ class MainWindow(QMainWindow):
             )
 
     def closeEvent(self, event):
+        handler = getattr(self, "close_handler", None)
+        if handler and handler(event):
+            return
         self.bridge.timer.stop()
         self.reader.page().setWebChannel(None)
+        # Replace the owned page before its private profile is destroyed by Qt.
+        self.reader.stop()
+        self.reader.setPage(QWebEnginePage(self.reader))
         super().closeEvent(event)
