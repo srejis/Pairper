@@ -12,6 +12,8 @@ interface QtBridge {
   importPdfs(id: string): void;
   openDiagnostics(id: string): void;
   reconnectTunnel(id: string): void;
+  autostartStatus(id: string): void;
+  setAutostart(id: string, enabled: boolean): void;
 }
 declare global {
   interface Window {
@@ -42,16 +44,19 @@ export function connectBridge(): Promise<PairperApi> {
           else item.reject(new Error(result.error));
         } catch { item.reject(new Error('데스크톱 응답 형식을 확인할 수 없습니다.')); }
       });
-      function call<T>(method: 'listPapers' | 'getDocument' | 'connectionStatus' | 'importPdfs' | 'openDiagnostics' | 'reconnectTunnel', argument?: string): Promise<T> {
+      function call<T>(method: 'listPapers' | 'getDocument' | 'connectionStatus' | 'importPdfs' | 'openDiagnostics' | 'reconnectTunnel' | 'autostartStatus' | 'setAutostart', argument?: string | boolean): Promise<T> {
         const id = `${method === 'importPdfs' ? 'import' : 'request'}_${++sequence}`;
         return new Promise((res, rej) => {
           const timer = setTimeout(() => { pending.delete(id); rej(new Error('데스크톱 응답이 지연되고 있습니다.')); }, method === 'importPdfs' ? 600000 : 60000);
           pending.set(id, { resolve: data => res(data as T), reject: rej, timer });
-          if (method === 'getDocument') bridge.getDocument(id, argument!);
+          if (method === 'getDocument') bridge.getDocument(id, argument as string);
+          else if (method === 'setAutostart') bridge.setAutostart(id, argument as boolean);
           else bridge[method](id);
         });
       }
       resolve({
+        autostartStatus: () => call('autostartStatus'),
+        setAutostart: enabled => call('setAutostart', enabled),
         listPapers: () => call('listPapers'),
         getDocument: id => call('getDocument', id),
         connectionStatus: () => call('connectionStatus'),

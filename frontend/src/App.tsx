@@ -9,6 +9,30 @@ export function App({ api }: { api: PairperApi }) {
   const [connection, setConnection] = useState<ConnectionStatus | null>(null);
   const [importing, setImporting] = useState(false);
   const [notice, setNotice] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [autostart, setAutostart] = useState<boolean | null>(null);
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const [settingsError, setSettingsError] = useState('');
+  useEffect(() => {
+    if (!settingsOpen) return;
+    let active = true;
+    setAutostart(null);
+    setSettingsError('');
+    void api.autostartStatus().then(status => {
+      if (active) setAutostart(status.enabled);
+    }).catch(() => {
+      if (active) setSettingsError('자동 실행 상태를 확인하지 못했습니다. 설정을 닫고 다시 열어 주세요.');
+    });
+    return () => { active = false; };
+  }, [api, settingsOpen]);
+  async function changeAutostart() {
+    if (settingsBusy || autostart === null) return;
+    setSettingsBusy(true);
+    setSettingsError('');
+    try { setAutostart((await api.setAutostart(!autostart)).enabled); }
+    catch { setSettingsError('자동 실행 설정을 변경하지 못했습니다. Windows 작업 스케줄러 권한과 기존 Pairper 작업을 확인해 주세요.'); }
+    finally { setSettingsBusy(false); }
+  }
   const refresh = useCallback(async () => {
     try {
       const list = await api.listPapers();
@@ -57,8 +81,18 @@ export function App({ api }: { api: PairperApi }) {
       <button type="button" onClick={() => {
         void api.reconnectTunnel?.().then(setConnection).catch(e => setNotice(e.message));
       }}>다시 연결</button>
+      <button type="button" disabled={settingsBusy} aria-expanded={settingsOpen} aria-controls="app-settings" onClick={() => setSettingsOpen(!settingsOpen)}>설정</button>
       <button type="button" className="primary" disabled={importing} onClick={() => { void importPdfs(); }}>{importing ? 'PDF 등록 중…' : '+ PDF 추가'}</button></div>
     </header>
+    {settingsOpen ? <section className="settings-panel" id="app-settings" aria-labelledby="settings-heading">
+      <div><h2 id="settings-heading">설정</h2><p id="autostart-description">Windows 로그인 20초 후 Pairper를 트레이에서 실행하고 MCP를 연결합니다. 꺼도 현재 앱은 계속 실행됩니다.</p></div>
+      <div className="settings-control"><label className="autostart-toggle">
+        <input type="checkbox" role="switch" checked={autostart ?? false} disabled={autostart === null || settingsBusy}
+          aria-describedby="autostart-description" onChange={() => { void changeAutostart(); }} />
+        <span>로그인 시 자동 실행</span>
+      </label><small role="status">{settingsBusy ? '변경 중…' : autostart === null ? settingsError ? '확인 실패' : '상태 확인 중' : autostart ? '켜짐' : '꺼짐'}</small>
+      {settingsError ? <p role="alert">{settingsError}</p> : null}</div>
+    </section> : null}
     <div className="workspace"><PaperLibrary papers={papers} selected={selected} onSelect={setSelected} />
       <div className="reading-pane"><div className="paper-toolbar"><span>{paper?.title ?? '라이브러리'}</span>
         {paper ? <small>{paper.page_count}페이지 · {statusLabels[paper.status]}</small> : null}</div>

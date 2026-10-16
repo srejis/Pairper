@@ -1,5 +1,6 @@
 param([ValidateRange(0,300)][int]$DelaySeconds=20, [switch]$ValidateOnly, [switch]$MigrateLegacyTunnelTask, [switch]$ShowWindow)
 $ErrorActionPreference='Stop'
+. "$PSScriptRoot\pairper-autostart-common.ps1"
 $pairperRoot=[System.IO.Path]::GetFullPath($PSScriptRoot)
 $pairperName='Pairper'
 $pairperUser=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -17,9 +18,9 @@ $pairperTrigger.Delay="PT${DelaySeconds}S"
 $pairperSettings=New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 $pairperPrincipal=New-ScheduledTaskPrincipal -UserId $pairperUser -LogonType Interactive -RunLevel Limited
 $pairperExisting=Get-ScheduledTask -TaskName $pairperName -ErrorAction SilentlyContinue
-if ($pairperExisting -and ($pairperExisting.Description -ne $pairperDescription -or $pairperExisting.Actions.Count -ne 1 -or -not $pairperExisting.Actions[0].Arguments.Contains($pairperScript) -or $pairperExisting.Principal.UserId -notin @($pairperUser,$pairperSid))) { throw 'The existing Pairper task ownership is unclear. No task was changed.' }
+if ($pairperExisting -and -not (Test-PairperTaskOwner $pairperExisting $pairperScript)) { throw 'The existing Pairper task ownership is unclear. No task was changed.' }
 $pairperOld=Get-ScheduledTask -TaskName 'Pairper MCP Tunnel' -ErrorAction SilentlyContinue
-if ($pairperOld -and ($pairperOld.Description -ne $pairperDescription -or $pairperOld.Actions.Count -ne 1 -or -not $pairperOld.Actions[0].Arguments.Contains($pairperOldScript) -or $pairperOld.Principal.UserId -notin @($pairperUser,$pairperSid))) { throw 'Legacy task ownership is unclear. No task was changed.' }
+if ($pairperOld -and -not (Test-PairperTaskOwner $pairperOld $pairperOldScript)) { throw 'Legacy task ownership is unclear. No task was changed.' }
 [PSCustomObject]@{TaskName=$pairperName;Command=$pairperShell;Arguments=$pairperArguments;WorkingDirectory=$pairperRoot;DelaySeconds=$DelaySeconds;RunLevel='Limited';ExecutionTimeLimit='PT0S';RestartCount=3;MultipleInstances='IgnoreNew';LegacyTaskPresent=[bool]$pairperOld;LegacyMigrationApproved=[bool]$MigrateLegacyTunnelTask}
 if ($ValidateOnly) { Write-Output 'Validation only. No task was registered, disabled or stopped.'; exit 0 }
 if ($pairperOld -and $pairperOld.State -ne 'Disabled' -and -not $MigrateLegacyTunnelTask) { throw 'Run again with -MigrateLegacyTunnelTask to explicitly approve disabling/stopping the owned legacy tunnel task.' }

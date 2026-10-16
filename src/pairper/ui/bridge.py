@@ -5,6 +5,7 @@ from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
+from pairper.app.autostart import autostart_status, set_autostart
 from pairper.document.presentation import display_document
 from pairper.tunnel.config import project_root
 from pairper.tunnel.runtime import public_status
@@ -119,6 +120,14 @@ class FrontendBridge(QObject):
         self.dispatch(request_id, load)
 
     @Slot(str)
+    def autostartStatus(self, request_id):
+        self.dispatch(request_id, lambda: autostart_status(self.root))
+
+    @Slot(str, bool)
+    def setAutostart(self, request_id, enabled):
+        self.dispatch(request_id, lambda: set_autostart(enabled, self.root))
+
+    @Slot(str)
     def connectionStatus(self, request_id):
         self.dispatch(request_id, self.connection_snapshot)
 
@@ -177,5 +186,5 @@ class FrontendBridge(QObject):
                 "Pairper 터널 진단",
                 "프로젝트 폴더에서 test-pairper-tunnel.ps1을 실행하세요.\n"
                 "진단 로그: .pairper/doctor.log\n"
-                "자동 시작은 install-pairper-autostart.ps1을 직접 실행해 설치합니다.",
+                "자동 시작은 앱 설정에서 켜거나 끌 수 있습니다.",
             )

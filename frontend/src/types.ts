@@ -33,6 +33,8 @@ export interface ConnectionStatus {
   changed_at?: string; retry_in_seconds?: number | null;
 }
 export interface PairperApi {
+  autostartStatus(): Promise<{ enabled: boolean }>;
+  setAutostart(enabled: boolean): Promise<{ enabled: boolean }>;
   listPapers(): Promise<Paper[]>;
   getDocument(id: string): Promise<DisplayDocument>;
   connectionStatus(): Promise<ConnectionStatus>;

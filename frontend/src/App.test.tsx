@@ -19,6 +19,8 @@ it('updates a pending paper when MCP publishes a view and imports through the de
       checked_at:null,last_healthy_at:null,healthy:true,ready:true,admin_url:null,chatgpt_verified:false })),
     importPdfs: vi.fn(async () => ({imported:1,failed:0})),
     openDiagnostics: vi.fn(),
+    autostartStatus: vi.fn(async () => ({enabled:true})),
+    setAutostart: vi.fn(async enabled => ({enabled})),
     reconnectTunnel: vi.fn(async () => ({state:'reconnecting',message:'MCP 터널 다시 연결 중',
       checked_at:null,last_healthy_at:null,healthy:false,ready:false,admin_url:null,chatgpt_verified:false})),
     onLibraryChanged: vi.fn(listener => { changed = listener; return () => {}; }),
@@ -34,4 +36,16 @@ it('updates a pending paper when MCP publishes a view and imports through the de
   fireEvent.click(screen.getByRole('button',{name:'다시 연결'}));
   expect(await screen.findByText('MCP 터널 다시 연결 중')).toBeInTheDocument();
   expect(api.reconnectTunnel).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole('button',{name:'설정'}));
+  const toggle = await screen.findByRole('switch',{name:'로그인 시 자동 실행'});
+  await waitFor(() => expect(toggle).toBeChecked());
+  fireEvent.click(toggle);
+  await waitFor(() => expect(toggle).not.toBeChecked());
+  expect(api.setAutostart).toHaveBeenCalledWith(false);
+  vi.mocked(api.setAutostart).mockRejectedValueOnce(new Error('Denied'));
+  fireEvent.click(toggle);
+  expect(await screen.findByRole('alert')).toHaveTextContent('자동 실행 설정을 변경하지 못했습니다');
+  expect(toggle).not.toBeChecked();
+  fireEvent.click(toggle);
+  await waitFor(() => expect(toggle).toBeChecked());
 });
