@@ -26,7 +26,7 @@ export function MathContent({ latex, verified, image, display = false }: {
 
 export function Runs({ runs }: { runs: Run[] }) {
   return runs.map((run, index) => <Fragment key={index}>
-    {run.prefix}{run.kind === 'text' ? run.text : <MathContent latex={run.latex}
+    {run.prefix}{run.kind === 'text' ? (run.superscript ? <sup>{run.text}</sup> : run.text) : <MathContent latex={run.latex}
       verified={run.source_verified} image={run.image_url} />}
   </Fragment>);
 }
@@ -68,10 +68,19 @@ export const Footnote = ({ content }: Props) => <p className="footnote-text"><Ru
 export const Reference = ({ content }: Props) => <p className="reference-text"><Runs runs={content.runs} /></p>;
 export const SourceRegion = ({ content }: Props) => <div className="source-scroll" role="region" aria-label="논문 내용" tabIndex={0}><SourceImage url={content.image_url} /></div>;
 
+export function Code({ content }: Props) {
+  const lines = content.code_lines ?? [];
+  return <div className="code-scroll"><pre className="code-content"><code>
+    {lines.map((line, index) => <Fragment key={index}>
+      {' '.repeat(line.indent)}<Runs runs={line.runs} />{index < lines.length - 1 ? '\n' : ''}
+    </Fragment>)}
+  </code></pre></div>;
+}
+
 const renderers: Record<BlockType, ComponentType<Props>> = {
   title: Title, authors: Authors, heading: Heading, paragraph: Paragraph, list: List,
   equation: Equation, figure: Figure, table: Table, caption: Caption, footnote: Footnote,
-  reference: Reference, source_region: SourceRegion,
+  reference: Reference, source_region: SourceRegion, code: Code,
 };
 export function BlockView({ block }: { block: DocumentBlock }) {
   const Component = renderers[block.type];

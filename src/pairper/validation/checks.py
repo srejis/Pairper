@@ -1,7 +1,7 @@
 import re
 from collections import Counter
 
-from pairper.document.models import Document, MathRun, rendered_refs
+from pairper.document.models import Document, MathRun, TextRun, rendered_refs
 from pairper.pdf.source import check_region
 
 
@@ -23,6 +23,7 @@ def validate_document(library, doc: Document):
     spans = {s["id"]: (p["page"], s) for p in source["pages"] for s in p["spans"]}
     used = Counter()
     regions = []
+    verified_text_bounds = []
     ids = [b.id for b in doc.blocks]
     if not doc.blocks:
         errors.append("Document has no blocks")
@@ -38,7 +39,15 @@ def validate_document(library, doc: Document):
         own_regions = [c.region] if c.region else []
         runs = list(c.runs) + [r for item in c.items for r in item]
         runs += [r for cell in c.cells for r in cell.runs]
+        runs += [r for line in c.code_lines for r in line.runs]
         own_regions += [r.region for r in runs if isinstance(r, MathRun)]
+        # SliceGPT captions use small coloured rectangles behind ordinary words.
+        # Reviewed native text covers a decoration contained in that same glyph box.
+        verified_text_bounds += [
+            (spans[ref][0], spans[ref][1]["bbox"])
+            for run in runs if isinstance(run, TextRun) and run.source_verified
+            for ref in run.refs if ref in spans
+        ]
         for region in own_regions:
             try:
                 check_region(source, region)
@@ -54,7 +63,14 @@ def validate_document(library, doc: Document):
             enclosed = [
                 ref
                 for ref, (page, s) in spans.items()
-                if page == region.page and contains(region.bbox, s["bbox"])
+                if page == region.page and (
+                    contains(region.bbox, s["bbox"])
+                    or (block.type == "figure" and contains(
+                        region.bbox, page_info.get("text_paint_bounds", {}).get(
+                            ref, page_info.get("rotated_glyph_bounds", {}).get(ref, s["bbox"])
+                        ),
+                    ))
+                )
             ]
             expected += [ref for ref in enclosed if ref not in expected]
         if set(block.source_refs) != set(expected):
@@ -77,8 +93,11 @@ def validate_document(library, doc: Document):
             c.asset_id = expected_asset
             if not library.managed(f"assets/{c.asset_id}.png").is_file():
                 errors.append(f"{block.id}: missing asset")
-            if block.type in {"equation", "table"} and not c.source_verified:
-                warnings.append(f"{block.id}: unverified reconstruction replaced by source image")
+            if block.type == "equation" and not (c.source_verified and c.latex and c.latex.strip()):
+                errors.append(f"{block.id}: equation requires source-verified LaTeX")
+                block.validation_status = "fallback"
+            if block.type == "table" and not (c.source_verified and c.cells):
+                errors.append(f"{block.id}: table requires source-verified structured cells")
                 block.validation_status = "fallback"
         if block.type == "table" and c.cells and c.source_verified:
             occupied = set()
@@ -96,8 +115,9 @@ def validate_document(library, doc: Document):
                         or not contains(run.region.bbox, spans[ref][1]["bbox"])
                     ):
                         errors.append(f"{block.id}: inline math reference outside source region")
-                if not run.source_verified:
-                    warnings.append(f"{block.id}: inline math uses original region")
+                if not (run.source_verified and run.latex.strip()):
+                    errors.append(f"{block.id}: inline math requires source-verified LaTeX")
+                    block.validation_status = "fallback"
     omitted = Counter(o.ref for o in doc.omissions)
     for omission in doc.omissions:
         if omission.ref not in spans:
@@ -129,12 +149,20 @@ def validate_document(library, doc: Document):
         if p["page"] not in doc.visual_review_pages:
             errors.append(f"Page {p['page']}: visual review not attested")
         for item in p["images"] + p["drawings"]:
+            if item.get("background_only"):
+                continue
             box = item.get("visible_bbox", item["bbox"])
             if box is None:
                 continue
             if box[2] - box[0] < 1 or box[3] - box[1] < 1:
                 continue
-            if not any(r.page == p["page"] and contains(r.bbox, box) for r in regions):
+            if not (
+                any(r.page == p["page"] and contains(r.bbox, box) for r in regions)
+                or (item in p["drawings"] and any(
+                    page == p["page"] and contains(bounds, box)
+                    for page, bounds in verified_text_bounds
+                ))
+            ):
                 errors.append(f"Page {p['page']}: uncovered visual region {box}")
         if not p["spans"] and not any(
             r.page == p["page"] and contains(r.bbox, (0, 0, p["width"], p["height"]))

@@ -25,8 +25,19 @@ class Region(StrictModel):
 class TextRun(StrictModel):
     kind: Literal["text"] = "text"
     refs: list[str] = Field(min_length=1)
+    # For visually verified glyphs absent from PDF text, such as a drawn underscore.
+    text_override: str | None = Field(default=None, min_length=1)
+    source_verified: bool = False
+    superscript: bool = False
     join: Literal["space", "none", "newline", "dehyphenate"] = "space"
     before: Literal["auto", "none", "space", "newline"] = "auto"
+
+
+    @model_validator(mode="after")
+    def verified_transcription(self):
+        if self.text_override is not None and not self.source_verified:
+            raise ValueError("Text transcription requires source verification")
+        return self
 
 
 class MathRun(StrictModel):
@@ -40,6 +51,11 @@ class MathRun(StrictModel):
 
 
 Run = Annotated[TextRun | MathRun, Field(discriminator="kind")]
+
+
+class CodeLine(StrictModel):
+    indent: int = Field(default=0, ge=0, le=200)
+    runs: list[Run] = Field(default_factory=list)
 
 
 class Cell(StrictModel):
@@ -60,6 +76,7 @@ class Content(StrictModel):
     latex: str | None = None
     number_refs: list[str] = Field(default_factory=list)
     cells: list[Cell] = Field(default_factory=list)
+    code_lines: list[CodeLine] = Field(default_factory=list)
     source_verified: bool = False
     caption_id: str | None = None
     figure_kind: str | None = None
@@ -79,6 +96,7 @@ BlockType = Literal[
     "footnote",
     "reference",
     "source_region",
+    "code",
 ]
 
 
@@ -93,14 +111,19 @@ class Block(StrictModel):
     @model_validator(mode="after")
     def structure(self):
         c = self.content
-        if self.type in {"equation", "figure", "table", "source_region"} and c.region is None:
+        if self.type in {"equation", "figure", "table", "source_region", "code"} and c.region is None:
             raise ValueError("Visual blocks require a source region")
-        if self.type not in {"equation", "figure", "table", "source_region"} and c.region:
+        if self.type not in {"equation", "figure", "table", "source_region", "code"} and c.region:
             raise ValueError("Use inline math regions or a separate visual block")
-        if self.type == "list":
+        if self.type != "code" and c.code_lines:
+            raise ValueError("Code lines are only valid for code blocks")
+        if self.type == "code":
+            if not c.code_lines or c.runs or c.items or c.cells:
+                raise ValueError("Code blocks require code lines only")
+        elif self.type == "list":
             if not c.items or c.runs or c.cells:
                 raise ValueError("List blocks require items only")
-        elif self.type in {"equation", "figure", "table", "source_region"}:
+        elif self.type in {"equation", "figure", "table", "source_region", "code"}:
             if c.runs or c.items:
                 raise ValueError("Visual blocks cannot hide text runs")
         elif not c.runs or c.items or c.cells:
@@ -131,6 +154,7 @@ def rendered_refs(block: Block) -> list[str]:
     """Only count text that will actually be displayed, never decorative declarations."""
     c = block.content
     runs = list(c.runs) + [r for item in c.items for r in item]
+    runs += [r for line in c.code_lines for r in line.runs]
     if block.type == "table" and c.source_verified and c.cells:
         runs += [r for cell in c.cells for r in cell.runs]
     return [ref for run in runs for ref in run.refs] + list(c.number_refs)

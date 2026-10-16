@@ -6,3 +6,12 @@
 .source-scroll{max-width:100%;overflow-x:auto}.source-scroll>.source-image{max-width:none}
 
 .equation-scroll .math-fallback>.source-image{max-width:none}
+
+.table-scroll .katex{white-space:nowrap}
+.equation-scroll{display:flex;align-items:center;gap:1em}
+.equation-scroll>.rendered-math{flex:1;min-width:max-content}
+.equation-number{float:none;flex-shrink:0}
+
+.code-scroll{overflow-x:auto;max-width:100%}.code-content{white-space:pre;font-family:ui-monospace,Consolas,monospace;font-size:.875em;line-height:1.7;overflow-wrap:normal;margin:1em 0}.code-content .katex{white-space:nowrap}
+
+.table-scroll{position:relative}

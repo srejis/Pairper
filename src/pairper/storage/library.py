@@ -222,17 +222,17 @@ class Library:
             os.replace(temp, path)
         return key
 
-    def begin(self, paper_id, source_sha256):
+    def begin(self, paper_id, source_sha256, revise_existing=False):
         paper = self.paper(paper_id)
         if paper["sha256"] != source_sha256:
             raise ValueError("Source hash mismatch")
         self.source(paper_id)
-        if self.valid_view(paper):
+        if self.valid_view(paper) and not revise_existing:
             raise ValueError("Paper already has a valid view; keep the existing view")
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             latest = dict(con.execute("SELECT * FROM papers WHERE id=?", (paper_id,)).fetchone())
-            if self.valid_view(latest):
+            if self.valid_view(latest) and not revise_existing:
                 raise ValueError("Paper already has a valid view; keep the existing view")
             old = con.execute(
                 "SELECT id FROM jobs WHERE paper_id=? AND stage!='finalized'", (paper_id,)
@@ -240,7 +240,12 @@ class Library:
             if old:
                 return {"job_id": old["id"], "resumed": True}
             job_id = uuid.uuid4().hex
-            doc = Document(paper_id=paper_id, source_sha256=source_sha256)
+            if revise_existing and latest["current_view_id"]:
+                view = con.execute("SELECT json_path FROM views WHERE id=?",
+                                   (latest["current_view_id"],)).fetchone()
+                doc = Document.model_validate_json(self.managed(view["json_path"]).read_text("utf-8"))
+            else:
+                doc = Document(paper_id=paper_id, source_sha256=source_sha256)
             staging = f"staging/{job_id}.json"
             write_json(self.managed(staging), doc.model_dump(mode="json"))
             con.execute(

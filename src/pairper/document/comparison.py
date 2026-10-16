@@ -15,6 +15,7 @@ def block_regions(block, source, spans=None):
     content = block.content
     regions = [content.region] if content.region else []
     runs = content.runs + [r for item in content.items for r in item]
+    runs += [r for line in content.code_lines for r in line.runs]
     if block.type == "table" and content.source_verified:
         runs += [r for cell in content.cells for r in cell.runs]
     regions += [r.region for r in runs if isinstance(r, MathRun)]

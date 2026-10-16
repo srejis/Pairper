@@ -46,7 +46,8 @@ def display_document(library, paper_id):
                     }
                 )
             else:
-                result.append({"kind": "text", "prefix": prefix, "text": text})
+                result.append({"kind": "text", "prefix": prefix, "text": text,
+                               **({"superscript": True} if run.superscript else {})})
         return result
 
     blocks = []
@@ -63,6 +64,8 @@ def display_document(library, paper_id):
             "image_url": asset(c.region) if c.region else None,
             "runs": runs(c.runs),
             "items": [runs(item) for item in c.items],
+            "code_lines": [{"indent": line.indent, "runs": runs(line.runs)}
+                           for line in c.code_lines],
             "cells": [
                 {
                     "row": cell.row,

@@ -22,3 +22,13 @@ th { background: #f3f6f6; }
 .source-scroll > .source { max-width: none; }
 
 .equation .source { max-width: none; }
+
+/* OFA table arithmetic and numbered equation, checked against the source. */
+.table-scroll .katex { white-space: nowrap; }
+.equation { display: flex; align-items: center; gap: 1em; }
+.equation > .math { flex: 1; min-width: max-content; }
+.equation-number { float: none; flex-shrink: 0; }
+
+.code-scroll{overflow-x:auto;max-width:100%}.code-content{white-space:pre;font-family:ui-monospace,Consolas,monospace;font-size:.875em;line-height:1.7;overflow-wrap:normal;margin:1em 0}.code-content .katex{white-space:nowrap}
+
+.table-scroll{position:relative}

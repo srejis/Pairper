@@ -47,7 +47,7 @@ def render_document(library, doc: Document, output: Path):
             if isinstance(run, MathRun):
                 parts.append(math(run.latex, run.region, run.source_verified, False))
             else:
-                parts.append(esc(text))
+                parts.append(f"<sup>{esc(text)}</sup>" if run.superscript else esc(text))
         return "".join(parts)
 
     bodies = []
@@ -61,6 +61,10 @@ def render_document(library, doc: Document, output: Path):
         elif block.type == "list":
             tag = "ol" if c.ordered else "ul"
             body = f"<{tag}>" + "".join(f"<li>{runs(item)}</li>" for item in c.items) + f"</{tag}>"
+        elif block.type == "code":
+            body = '<div class="code-scroll"><pre class="code-content"><code>' + "\n".join(
+                " " * line.indent + runs(line.runs) for line in c.code_lines
+            ) + "</code></pre></div>"
         elif block.type == "equation":
             body = math(c.latex, c.region, c.source_verified, True)
             if c.number_refs:

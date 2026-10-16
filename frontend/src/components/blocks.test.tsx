@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { BlockContent, BlockType, DocumentBlock } from '../types';
-import { BlockView, MathContent, Runs, SourceImage, Table } from './blocks';
+import { BlockView, Code, MathContent, Runs, SourceImage, Table } from './blocks';
 
 const image = `file:///library/assets/${'a'.repeat(32)}.png`;
 const text = { kind: 'text' as const, prefix: '', text: 'Original 42 units.' };
@@ -36,6 +36,20 @@ describe('document rendering contract', () => {
     const { container } = render(<p><Runs runs={[text, { kind:'text',prefix:' ',text:'<script>danger()</script>' }]} /></p>);
     expect(container.textContent).toBe('Original 42 units. <script>danger()</script>');
     expect(container.querySelector('script')).toBeNull();
+  });
+  it('preserves source code indentation and escapes prompt tokens', () => {
+    const { container } = render(<Code content={{ ...content, code_lines: [
+      { indent: 0, runs: [text] },
+      { indent: 4, runs: [{ kind: 'text', prefix: '', text: '<s>[INST] True [/INST]' }] },
+    ] }} />);
+    expect(container.querySelector('code')?.textContent).toBe('Original 42 units.\n    <s>[INST] True [/INST]');
+    expect(container.querySelector('s')).toBeNull();
+    expect(container.querySelector('img')).toBeNull();
+  });
+  it('renders a source footnote marker separately from adjacent math', () => {
+    const { container } = render(<Runs runs={[{ kind: 'text', prefix: '', text: '3', superscript: true }]} />);
+    expect(container.querySelector('sup')).toHaveTextContent('3');
+    expect(container.querySelector('.katex')).toBeNull();
   });
   it('refuses external and arbitrary file image URLs', () => {
     const { container } = render(<><SourceImage url="https://example.com/image.png" />

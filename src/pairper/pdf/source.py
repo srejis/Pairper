@@ -5,7 +5,7 @@ import pymupdf
 
 from pairper.document.models import Region
 
-EXTRACTOR_VERSION = 5
+EXTRACTOR_VERSION = 7
 
 
 class _VisualClips(pymupdf.mupdf.FzDevice2):
@@ -111,6 +111,13 @@ def extract_visuals(page):
     drawings = [{
         "bbox": list(drawing["rect"]), "type": drawing["type"],
         "visible_bbox": visible_bounds(drawing["rect"], paths),
+        # Deja Vu Figure 7 has a white plot background extending into its caption.
+        # Preserve the raw drawing, but blank paper padding is not independent ink.
+        "background_only": (drawing["type"] == "f"
+                            and drawing.get("fill") == (1.0, 1.0, 1.0)
+                            and drawing.get("fill_opacity") == 1.0
+                            and len(drawing["items"]) == 1
+                            and drawing["items"][0][0] == "re"),
     } for drawing in original_drawings]
     for image in images:
         image["visible_bbox"] = visible_bounds(pymupdf.Rect(image["bbox"]), image_bounds)
@@ -122,12 +129,61 @@ def extract_visuals(page):
     }
 
 
+
+def text_paint_bounds(page, spans):
+    """Exact trace matches for figure labels whose font boxes include blank padding."""
+    traces, painted = page.get_texttrace(), page.get_bboxlog()
+    by_text = {}
+    for trace in traces:
+        key = ("".join(chr(c[0]) for c in trace["chars"]), trace["font"], tuple(trace["dir"]))
+        by_text.setdefault(key, []).append(trace)
+    result = {}
+    for span in spans:
+        if not span["text"].strip():
+            continue
+        candidates = by_text.get((span["text"], span["font"], tuple(span["direction"])), [])
+        matches = [t for t in candidates
+                   if pymupdf.Rect(t["bbox"]).intersects(pymupdf.Rect(span["bbox"]))]
+        if len(matches) == 1:
+            kind, box = painted[matches[0]["seqno"]][:2]
+            if kind in {"fill-text", "stroke-text"}:
+                result[span["id"]] = list(box)
+    return result
+
+
+def rotated_glyph_bounds(page, spans):
+    """Actual painted bounds for rotated singleton glyphs (OFA Figure 2 arrows).
+
+    Font ascender boxes can extend into the following caption. Keep those original
+    boxes and IDs intact; only use an unambiguous text-paint match for figure coverage.
+    """
+    targets = [s for s in spans if len(s["text"]) == 1
+               and tuple(s["direction"]) != (1.0, 0.0)]
+    if not targets:
+        return {}
+    traces, painted = page.get_texttrace(), page.get_bboxlog()
+    result = {}
+    for span in targets:
+        matches = [t for t in traces if len(t["chars"]) == 1
+                   and t["chars"][0][0] == ord(span["text"])
+                   and t["font"] == span["font"]
+                   and tuple(t["dir"]) == tuple(span["direction"])
+                   and pymupdf.Rect(t["bbox"]).intersects(pymupdf.Rect(span["bbox"]))]
+        if len(matches) == 1:
+            kind, box = painted[matches[0]["seqno"]][:2]
+            if kind in {"fill-text", "stroke-text"}:
+                result[span["id"]] = list(box)
+    return result
+
+
 def refresh_visuals(path: Path, source: dict):
     """Refresh old coverage metadata without re-extracting or changing stable text IDs."""
     with pymupdf.open(path) as pdf:
         for page, original in zip(pdf, source["pages"], strict=True):
             page.set_rotation(0)
             original.update(extract_visuals(page))
+            original["rotated_glyph_bounds"] = rotated_glyph_bounds(page, original["spans"])
+            original["text_paint_bounds"] = text_paint_bounds(page, original["spans"])
     source["extractor_version"] = EXTRACTOR_VERSION
 
 
@@ -176,6 +232,8 @@ def extract(path: Path, digest: str) -> dict:
                     "rotation": original_rotation,
                     "coordinate_system": "unrotated_pdf_points_top_left",
                     "spans": spans,
+                    "rotated_glyph_bounds": rotated_glyph_bounds(page, spans),
+                    "text_paint_bounds": text_paint_bounds(page, spans),
                     **extract_visuals(page),
                 }
             )

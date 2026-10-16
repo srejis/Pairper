@@ -12,20 +12,27 @@ from pairper.document.models import Block, Document, Omission, Region
 from pairper.storage.library import Library
 
 WORKFLOW = """Pairper 논문 업데이트 절차:
-1. list_pending_papers로 새 대상만 찾는다. 유효한 기존 뷰는 재생성하지 않는다.
+1. list_pending_papers로 새 대상을 찾는다. 기존 뷰의 실제 오류를 수정하는 명시적 작업은
+begin_view_build(revise_existing=true)로 이전 문서의 별도 교정본을 만든다. 원본과 이전 뷰는 보존한다.
 2. get_paper_manifest, 모든 get_page_content와 get_page_image를 읽는다.
 이미지가 모델에 전달되지 않으면 중단하고 연결 문제를 보고한다.
 3. document_schema 리소스를 읽는다. 원문을 요약/번역/의역하지 않는다.
-텍스트는 runs의 refs로만 연결한다. 문단을 단과 페이지 경계를 넘어 재구성한다.
-그림/벡터 도식/표/수식의 원본 영역을 반드시 포함한다. 불확실한 것은 source_region
-또는 source_verified=false인 수식/표로 보존한다. 이미지의 전체 페이지 대체는 스캔
-페이지 외에는 사용하지 않는다. 작은 영역을 요청하여 기호와 숫자를 대조한다.
+텍스트는 runs의 refs로 연결한다. PDF에서 문자 대신 선으로 그린 밑줄처럼 원본 추출이
+실제로 손실한 문자는 원본 대조 후에만 text_override와 source_verified=true로 복원한다.
+원본 refs는 유지하며 요약이나 의역에는 사용하지 않는다. 각주 표지는 text run의
+superscript=true로 표시한다. 문단을 단과 페이지 경계를 넘어 재구성한다.
+그림/벡터 도식은 이미지로 보존할 수 있다. 수식은 원본과 대조한 LaTeX로, 표는 행·열·
+병합 셀 및 셀의 원문 refs/수식을 보존하여 구조화한다. 수식·표 이미지는 완료로 인정하지
+않는다. 알고리즘·코드는 code의 code_lines에 원본 들여쓰기와 refs/LaTeX를 보존한다.
+불확실한 내용은 추측하지 않고 검토 중인 빌드에 남긴다. 본문·수식·표를 그림이나
+source_region으로 바꾸어 우회하지 않는다. 작은 원본 영역에서 기호와 숫자를 대조한다.
 4. begin_view_build 후 append_document_blocks로 배치 저장한다. 같은 블록 ID는 수정한다.
 source_refs는 실제 표시 텍스트 ID와 원본 영역에 완전히 포함된 텍스트 ID의 합집합이다.
 각 페이지를 시각 검토한 후 visual_review_pages에 기록한다. 이는 검토자의 진술이다.
 생략은 장식적 페이지 번호/반복 머리말/꼬리말만 허용하며 omissions에 근거를 기록한다.
 5. validate_view_build와 get_build_report에서 오류를 확인하고 같은 ID로 수정한다.
-finalize_view_build가 성공할 때만 완료를 보고한다. 미검증 복원은 원본 이미지로 표시된다.
+finalize_view_build가 성공하고 실제 렌더링도 확인했을 때만 완료를 보고한다.
+수식·표의 미검증 이미지 대체는 저장 검증을 통과하지 않는다.
 6. 새 완료 수, 기존 완료 수, 검토 필요 수를 구분해 보고한다. 자동 검증이 의미적
 동일성이나 읽기 순서를 증명한다고 주장하지 않는다.
 """
@@ -99,9 +106,11 @@ def create_server(library: Library | None = None):
         )
 
     @tool()
-    def begin_view_build(paper_id: str, source_sha256: str) -> dict[str, Any]:
-        """Begin or resume one exclusive build. Already-complete papers are protected."""
-        return library.begin(paper_id, source_sha256)
+    def begin_view_build(
+        paper_id: str, source_sha256: str, revise_existing: bool = False
+    ) -> dict[str, Any]:
+        """Begin/resume one build. Explicit revisions copy the saved document, preserving its view."""
+        return library.begin(paper_id, source_sha256, revise_existing=revise_existing)
 
     @tool()
     def append_document_blocks(

@@ -111,7 +111,7 @@ def test_python_html_and_display_model_use_identical_run_text(library, pdf_path)
     assert parser.result == expected
 
 
-def test_unverified_table_does_not_resolve_unused_reconstruction(library, pdf_path):
+def test_unverified_table_does_not_resolve_unused_reconstruction(library, pdf_path, monkeypatch):
     from pairper.document.models import Block, Cell, Content, Region
 
     paper = library.register(pdf_path)
@@ -129,7 +129,13 @@ def test_unverified_table_does_not_resolve_unused_reconstruction(library, pdf_pa
     )
     job = library.begin(paper["id"], paper["sha256"])["job_id"]
     library.append(job, [table], [], [1])
-    assert library.validate(job, finalize=True)["valid"]
+    assert not library.validate(job, finalize=True)["valid"]
+    # Earlier stored documents remain displayable while new completion requires cells.
+    from pairper.document.models import Document
+
+    document = Document(paper_id=paper["id"], source_sha256=paper["sha256"], blocks=[table])
+    monkeypatch.setattr("pairper.document.presentation.load_document",
+                        lambda *_: (paper, document))
     content = display_document(library, paper["id"])["blocks"][0]["content"]
     assert content["cells"] == [] and content["image_url"].startswith("file:///")
 

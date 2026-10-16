@@ -7,6 +7,10 @@ from pairper.document.models import MathRun
 
 def resolve_text(run, spans, audit):
     originals = [spans[ref]["text"] for ref in run.refs]
+    if run.text_override is not None:
+        audit.append({"refs": run.refs, "original_strings": originals,
+                      "operation": "verified_text_transcription", "result": run.text_override})
+        return run.text_override
     separator = {"space": " ", "none": "", "newline": "\n", "dehyphenate": " "}[run.join]
     result = originals[0] if originals else ""
     for text in originals[1:]:
@@ -52,6 +56,12 @@ def boundary(previous, current, spans):
     # A math reconstruction does not render the leading whitespace in its source refs.
     if isinstance(current, MathRun) and right.startswith((" ", "\n", "\t")):
         return "" if left.endswith((" ", "\n", "\t")) else " "
+    # OFA/AutoML math renderers also discard source trailing whitespace.
+    if isinstance(previous, MathRun) and left.endswith((" ", "\n", "\t")):
+        if isinstance(current, MathRun) or not (
+            right.startswith((" ", "\n", "\t")) or re.match(r"^[,.;:!?)}\]]", right)
+        ):
+            return " "
     if (
         left.endswith((" ", "\n", "\t", "-", "(", "[", "{"))
         or right.startswith((" ", "\n", "\t"))

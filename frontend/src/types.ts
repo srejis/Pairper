@@ -5,8 +5,8 @@ export interface Paper {
   created_at?: string; original_available?: boolean; error?: string | null;
 }
 export type BlockType = 'title' | 'authors' | 'heading' | 'paragraph' | 'list' | 'equation' |
-  'figure' | 'table' | 'caption' | 'footnote' | 'reference' | 'source_region';
-export interface TextRun { kind: 'text'; prefix: string; text: string }
+  'figure' | 'table' | 'caption' | 'footnote' | 'reference' | 'source_region' | 'code';
+export interface TextRun { kind: 'text'; prefix: string; text: string; superscript?: boolean }
 export interface MathRun { kind: 'math'; prefix: string; latex: string;
   source_verified: boolean; image_url: string }
 export type Run = TextRun | MathRun;
@@ -15,6 +15,7 @@ export interface Cell {
 }
 export interface BlockContent {
   runs: Run[]; items: Run[][]; cells: Cell[]; level: number; ordered: boolean;
+  code_lines?: { indent: number; runs: Run[] }[];
   source_verified: boolean; image_url: string | null; latex: string | null;
   number: string; caption_id: string | null;
 }
