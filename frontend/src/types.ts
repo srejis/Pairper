@@ -19,12 +19,8 @@ export interface BlockContent {
   number: string; caption_id: string | null;
 }
 export interface DocumentBlock {
-  source_regions?: SourceRegionInfo[]; source_error?: string | null;
   id: string; type: BlockType; order: number; validation_status: string; content: BlockContent;
-  source_trace: { id: string; page: number; text: string; bbox: number[] }[];
 }
-export interface SourceRegionInfo { id: string; page: number; bbox: number[] }
-export interface SourceComparison { image_url: string; page: number; region_id: string }
 export interface DisplayDocument {
   display_schema_version: '1.0'; source_schema_version: '1.0';
   paper_id: string; view_id: string; blocks: DocumentBlock[];
@@ -38,7 +34,6 @@ export interface ConnectionStatus {
 }
 export interface PairperApi {
   copyUpdateRequest(paperId: string): Promise<{copied: boolean}>;
-  sourceRegion(paperId: string, viewId: string, blockId: string, regionId: string): Promise<SourceComparison>;
   autostartStatus(): Promise<{ enabled: boolean }>;
   setAutostart(enabled: boolean): Promise<{ enabled: boolean }>;
   listPapers(): Promise<Paper[]>;

@@ -155,6 +155,8 @@ def test_escaping_and_normalization_audit(library, tmp_path):
     html_path = library.view_path(paper["id"])
     markup = html_path.read_text("utf-8")
     assert "<script>alert" not in markup and "&lt;script&gt;" in markup
+    assert "<details" not in markup
+    assert "원문 참조" not in markup and "원본 대조" not in markup
     assert "wordbreak" in markup
     audit = json.loads(html_path.with_suffix(".normalization.json").read_text("utf-8"))
     assert audit[0]["original_strings"][-2:] == ["word-", "break"]

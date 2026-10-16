@@ -6,7 +6,7 @@
   --warning:#927044;--danger:#A2483B;--radius:7px;--space-1:4px;--space-2:8px;
   --space-3:12px;--space-4:16px;--space-5:24px;--space-6:32px;--space-7:36px;
   --header-height:60px;--toolbar-height:56px;--content-width:1040px;--document-width:860px;
-  --document-padding:72px;--panel-width:320px;--reader-font-size:17px;
+  --document-padding:72px;--panel-width:320px;--reader-font-size:clamp(1rem,calc(.9rem + .25vw),1.1875rem);
   --font-ui:Inter,Pretendard,'Malgun Gothic',system-ui,sans-serif;
   font-family:var(--font-ui);color:var(--text);background:var(--bg);font-synthesis:none;color-scheme:light;
 }

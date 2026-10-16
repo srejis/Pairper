@@ -84,24 +84,10 @@ def render_document(library, doc: Document, output: Path):
             )
         elif block.type in {"figure", "source_region", "table"}:
             body = image(c.region)
+            if block.type in {"source_region", "table"}:
+                body = '<div class="source-scroll" role="region" aria-label="논문 내용" tabindex="0">' + body + "</div>"
         else:
             body = f"<p>{body}</p>"
-        # Source access is always available, including verified reconstructed equations/tables.
-        if c.region:
-            body += "<details><summary>원본 대조</summary>" + image(c.region) + "</details>"
-        trace = [
-            {"id": ref, "text": spans[ref]["text"], "bbox": spans[ref]["bbox"]}
-            for ref in block.source_refs
-            if ref in spans
-        ]
-        if trace:
-            import json
-
-            body += (
-                '<details class="trace"><summary>원문 참조</summary><pre>'
-                + esc(json.dumps(trace, ensure_ascii=False, indent=2))
-                + "</pre></details>"
-            )
         bodies.append(f'<section id="{esc(block.id)}" class="block {block.type}">{body}</section>')
     css = (WEB / "reader.css").as_uri()
     katex_css = (WEB / "katex/katex.min.css").as_uri()

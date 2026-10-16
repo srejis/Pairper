@@ -10,16 +10,14 @@ const textContent = { runs:[{kind:'text' as const,prefix:'',text:'Source-faithfu
   level:2,ordered:false,source_verified:true,image_url:null,latex:null,number:'',caption_id:null };
 const doc: DisplayDocument = { display_schema_version:'1.0',source_schema_version:'1.0',
   paper_id:'paper',view_id:'view',normalization_audit:[],blocks:[
-    {id:'title',type:'title',order:0,validation_status:'source_verified',source_trace:[],content:textContent},
-    {id:'heading',type:'heading',order:1,validation_status:'source_verified',source_trace:[],content:{...textContent,runs:[{kind:'text',prefix:'',text:'Methods'}]}},
-    {id:'paragraph',type:'paragraph',order:2,validation_status:'source_verified',source_trace:[],content:textContent,
-      source_regions:[{id:'r0',page:1,bbox:[0,0,20,20]},{id:'r1',page:2,bbox:[0,0,20,20]}]},
+    {id:'title',type:'title',order:0,validation_status:'source_verified',content:textContent},
+    {id:'heading',type:'heading',order:1,validation_status:'source_verified',content:{...textContent,runs:[{kind:'text',prefix:'',text:'Methods'}]}},
+    {id:'paragraph',type:'paragraph',order:2,validation_status:'source_verified',content:textContent},
   ] };
 function makeApi(papers: Paper[] = [pending]) {
   return {
     listPapers: vi.fn(async () => papers), getDocument: vi.fn(async () => doc),
     copyUpdateRequest: vi.fn(async (_paperId: string) => ({copied:true})),
-    sourceRegion: vi.fn(async (_p: string,_v: string,_b: string,r: string) => ({image_url:`file:///library/assets/${'a'.repeat(32)}.png`,page:r === 'r0' ? 1 : 2,region_id:r})),
     connectionStatus: vi.fn(async () => ({state:'connected',message:'연결됨',checked_at:null,last_healthy_at:null,healthy:true,ready:true,admin_url:null,chatgpt_verified:false})),
     importPdfs: vi.fn(async () => ({imported:1,failed:0})), openDiagnostics: vi.fn(async () => ({state:'connected',message:'연결됨',checked_at:null,last_healthy_at:null,healthy:true,ready:true,admin_url:null,chatgpt_verified:false})),
     autostartStatus: vi.fn(async () => ({enabled:true})), setAutostart: vi.fn(async (enabled: boolean) => ({enabled})),
@@ -91,7 +89,7 @@ it('retains autostart, diagnostics and reconnect in settings and shows failures'
   expect(api.openDiagnostics).toHaveBeenCalledOnce();
 });
 
-it('uses saved headings, navigates source regions, restores focus, and changes only UI font size', async () => {
+it('keeps heading navigation and focus without source or manual font controls', async () => {
   localStorage.clear();
   const api = makeApi([ready]);
   const {container} = render(<App api={api} />);
@@ -104,22 +102,12 @@ it('uses saved headings, navigates source regions, restores focus, and changes o
   expect(screen.getByRole('button',{name:'Methods'})).toHaveAttribute('aria-current','location');
   fireEvent.click(screen.getByRole('button',{name:'목차 닫기'}));
   await waitFor(() => expect(toc).toHaveFocus());
-  const source = screen.getByRole('button',{name:'원본 확인'});
-  source.focus(); fireEvent.click(source);
-  await waitFor(() => expect(api.sourceRegion).toHaveBeenCalledWith('paper','view','paragraph','r0'));
-  expect(container.querySelector('.source-selected')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button',{name:'다음 원본 영역'}));
-  await waitFor(() => expect(api.sourceRegion).toHaveBeenCalledWith('paper','view','paragraph','r1'));
-  fireEvent.click(screen.getByRole('button',{name:'원본 확대'}));
-  expect(screen.getByLabelText('원본 배율')).toHaveTextContent('125%');
-  fireEvent.click(screen.getByRole('button',{name:'원본 대조 닫기'}));
-  await waitFor(() => expect(source).toHaveFocus());
+  expect(screen.queryByRole('button',{name:'원본 확인'})).toBeNull();
+  expect(screen.queryByRole('button',{name:'글자 설정'})).toBeNull();
+  expect(screen.queryByText('원본 대조')).toBeNull();
+  expect(screen.queryByText('원문 참조')).toBeNull();
   expect(container.querySelector('.source-selected')).toBeNull();
-  fireEvent.click(screen.getByRole('button',{name:'글자 설정'}));
-  for (let i=0;i<8;i++) fireEvent.click(screen.getByRole('button',{name:'글자 크기 증가'}));
-  expect(screen.getByLabelText('본문 글자 크기')).toHaveTextContent('21px');
-  expect(localStorage.getItem('pairper.ui.v1.fontSize')).toBe('21');
-  fireEvent.click(screen.getByRole('button',{name:'기본값 복원'}));
-  expect(screen.getByLabelText('본문 글자 크기')).toHaveTextContent('17px');
+  expect(container.querySelector('.reader')).not.toHaveAttribute('style');
+  expect(localStorage.getItem('pairper.ui.v1.fontSize')).toBeNull();
   expect(api.getDocument).toHaveBeenCalledOnce();
 });

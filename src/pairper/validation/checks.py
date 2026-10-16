@@ -129,7 +129,9 @@ def validate_document(library, doc: Document):
         if p["page"] not in doc.visual_review_pages:
             errors.append(f"Page {p['page']}: visual review not attested")
         for item in p["images"] + p["drawings"]:
-            box = item["bbox"]
+            box = item.get("visible_bbox", item["bbox"])
+            if box is None:
+                continue
             if box[2] - box[0] < 1 or box[3] - box[1] < 1:
                 continue
             if not any(r.page == p["page"] and contains(r.bbox, box) for r in regions):

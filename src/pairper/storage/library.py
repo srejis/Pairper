@@ -12,7 +12,14 @@ from pathlib import Path
 from platformdirs import user_data_path
 
 from pairper.document.models import Block, Document, Omission, Region
-from pairper.pdf.source import extract, extract_embedded_images, render, sha256
+from pairper.pdf.source import (
+    EXTRACTOR_VERSION,
+    extract,
+    extract_embedded_images,
+    refresh_visuals,
+    render,
+    sha256,
+)
 
 
 def now():
@@ -168,6 +175,9 @@ class Library:
         data = json.loads((self.root / "sources" / f"{paper['id']}.json").read_text("utf-8"))
         if data["sha256"] != paper["sha256"]:
             raise ValueError("Extracted source hash mismatch")
+        if data.get("extractor_version", 1) < EXTRACTOR_VERSION:
+            refresh_visuals(self.managed(paper["original_path"]), data)
+            write_json(self.root / "sources" / f"{paper['id']}.json", data)
         return data
 
     def manifest(self, paper_id):

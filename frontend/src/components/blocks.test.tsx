@@ -11,11 +11,13 @@ const content: BlockContent = {
 };
 describe('document rendering contract', () => {
   const types: BlockType[] = ['title','authors','heading','paragraph','list','equation','figure','table','caption','footnote','reference','source_region'];
-  it.each(types)('renders %s with source comparison', type => {
-    const block: DocumentBlock = { id: 'b', order: 0, type, validation_status: 'source_verified', content, source_trace: [] };
+  it.each(types)('renders %s without exposing internal source controls', type => {
+    const block: DocumentBlock = { id: 'b', order: 0, type, validation_status: 'source_verified', content };
     const view = render(<BlockView block={block} />);
     expect(view.container.querySelector(`[data-block-type="${type}"]`)).toBeInTheDocument();
-    expect(screen.getByText('원본 대조')).toBeInTheDocument();
+    expect(screen.queryByText('원본 대조')).toBeNull();
+    expect(screen.queryByText('원문 참조')).toBeNull();
+    expect(view.container.querySelector('details')).toBeNull();
   });
   it('renders merged cells using exact source text', () => {
     render(<Table content={content} />);

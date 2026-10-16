@@ -132,3 +132,50 @@ def test_unverified_table_does_not_resolve_unused_reconstruction(library, pdf_pa
     assert library.validate(job, finalize=True)["valid"]
     content = display_document(library, paper["id"])["blocks"][0]["content"]
     assert content["cells"] == [] and content["image_url"].startswith("file:///")
+
+
+@pytest.mark.parametrize(("left", "before", "expected"), [
+    ("This enables us to remove", "auto", " "),
+    ("This enables us to remove ", "auto", ""),
+    ("This enables us to remove", "none", ""),
+])
+def test_inline_math_keeps_source_word_separator(left, before, expected):
+    from pairper.document.models import MathRun, Region
+    from pairper.document.text import resolved_runs
+
+    # Actual paper pattern: prose followed by source " 4d" reconstructed as LaTeX.
+    spans = {
+        "prose": {"text": left, "bbox": (0, 0, 100, 12), "size": 12},
+        "math": {"text": " 4d", "bbox": (100, 0, 120, 12), "size": 12},
+    }
+    runs = [TextRun(refs=["prose"]), MathRun(
+        latex="4d", refs=["math"], region=Region(page=1, bbox=(100, 0, 120, 12)),
+        source_verified=True, before=before,
+    )]
+    assert list(resolved_runs(runs, spans, []))[1][1] == expected
+
+
+@pytest.mark.parametrize(("strings", "expected"), [
+    (["Jorge Garc´ıa-Carrasco, Alejandro Mat´e"], "Jorge García-Carrasco, Alejandro Maté"),
+    (["M", "¨", "uller, L´ala, ´Edouard"], "Müller, Lála, Édouard"),
+    (["Carreira-Perpi˜n´an, Innovaci´on"], "Carreira-Perpiñán, Innovación"),
+    (["From this perspective, a na", "¨", "ıve training approach"],
+     "From this perspective, a naïve training approach"),
+])
+def test_observed_pdf_accents_compose_without_changing_source(strings, expected):
+    from pairper.document.text import resolve_text
+
+    spans = {str(i): {"text": text} for i, text in enumerate(strings)}
+    audit = []
+    assert resolve_text(TextRun(refs=list(spans), join="none"), spans, audit) == expected
+    assert [s["text"] for s in spans.values()] == strings
+    assert any(a["operation"] == "compose_pdf_accents" and a["original_strings"] == strings
+               for a in audit)
+
+
+def test_observed_accent_and_line_end_hyphen_share_a_run():
+    from pairper.document.text import resolve_text
+
+    spans = {"accent": {"text": "´"}, "name": {"text": "Edouard Duch-"},
+             "continuation": {"text": "esnay"}}
+    assert resolve_text(TextRun(refs=list(spans), join="dehyphenate"), spans, []) == "Édouard Duchesnay"

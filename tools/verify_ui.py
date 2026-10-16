@@ -254,39 +254,18 @@ def main():
             "document.querySelector('dialog').dispatchEvent(new MouseEvent('click',{clientX:0,clientY:0,bubbles:true}))"
         )
         until("!document.querySelector('dialog')")
-        click('[data-block-id="b3"] .inspect-button')
-        until("!!document.querySelector('.comparison-viewport img')")
-        until("document.querySelector('.comparison-viewport img').naturalWidth>0")
-        assert js("!!document.querySelector('[data-block-id=b3].source-selected')")
-        snapshot("source-1280.png")
-        click('[aria-label="원본 확대"]')
-        assert js("document.querySelector('[aria-label=\"원본 배율\"]').textContent==='125%'")
-        js("document.querySelector('dialog').dispatchEvent(new Event('cancel',{cancelable:true}))")
-        until("!document.querySelector('dialog')")
-        assert not js("!!document.querySelector('.source-selected')")
-        assert js("document.activeElement.classList.contains('inspect-button')")
-        result["source_render_and_escape"] = True
-        click('[data-block-id="multi"] .inspect-button')
-        until("!!document.querySelector('.comparison-viewport img')")
-        click('[aria-label="다음 원본 영역"]')
-        until(
-            "document.querySelector('.region-caption')?.textContent.includes('2페이지') && !!document.querySelector('.comparison-viewport img')"
-        )
-        until("document.querySelector('.comparison-viewport img').naturalWidth>0")
-        snapshot("source-multipage-1280.png")
-        result["multiple_source_pages"] = True
-        click('[aria-label="원본 대조 닫기"]')
-        until("!document.querySelector('dialog')")
-        click('[aria-label="글자 설정"]')
-        click('[aria-label="글자 크기 증가"]')
-        assert js("document.querySelector('[aria-label=\"본문 글자 크기\"]').textContent==='18px'")
-        click(".font-settings .text-button")
-        click('[aria-label="글자 설정 닫기"]')
-        until("!document.querySelector('dialog')")
+        assert not js("!!document.querySelector('.inspect-button,.source-comparison,.source-trace')")
+        assert not js("!!document.querySelector('[aria-label=\"글자 설정\"]')")
+        wide_font = js("parseFloat(getComputedStyle(document.querySelector('.paper-document')).fontSize)")
+        result["source_and_font_controls_removed"] = True
         window.resize(480, 760)
         js("document.querySelector('.reader').scrollTo(0,0)")
         pause(400)
         snapshot("reader-480.png")
+        narrow_font = js("parseFloat(getComputedStyle(document.querySelector('.paper-document')).fontSize)")
+        assert 16 <= narrow_font < wide_font <= 19, (narrow_font, wide_font)
+        result["responsive_font_sizes"] = {"narrow": narrow_font, "wide": wide_font}
+
         assert js("document.querySelector('.reader-toolbar').scrollWidth<=window.innerWidth")
         assert js("document.querySelector('.paper-document').getBoundingClientRect().width<480")
         click('[aria-label="목차"]')
@@ -311,7 +290,10 @@ def main():
         result.update(passed=False, error=str(exc))
         snapshot("failure.png")
     finally:
-        app.clipboard().setMimeData(saved_clipboard)
+        if saved_clipboard.formats():
+            app.clipboard().setMimeData(saved_clipboard)
+        else:
+            app.clipboard().clear()
         QFileDialog.getOpenFileNames = original_chooser
         window.close()
         (root / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), "utf-8")
