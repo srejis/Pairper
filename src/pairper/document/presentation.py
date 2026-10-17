@@ -2,6 +2,7 @@
 
 from pairper.document.comparison import region_descriptors
 from pairper.document.models import Document, MathRun
+from pairper.document.structure import block_tree
 from pairper.document.text import resolved_runs
 
 DISPLAY_SCHEMA_VERSION = "1.0"
@@ -28,6 +29,7 @@ def display_document(library, paper_id):
     source = library.source(paper_id)
     spans = {s["id"]: {**s, "page": p["page"]} for p in source["pages"] for s in p["spans"]}
     audit = []
+    block_tree(document.blocks)  # Reject malformed nesting before it reaches recursive UI rendering.
 
     def asset(region):
         return library.managed(f"assets/{library.asset(paper_id, region)}.png").as_uri()
@@ -47,6 +49,9 @@ def display_document(library, paper_id):
                 )
             else:
                 result.append({"kind": "text", "prefix": prefix, "text": text,
+                               **({"bold": True} if run.bold else {}),
+                               **({"italic": True} if run.italic else {}),
+                               **({"underline": True} if run.underline else {}),
                                **({"superscript": True} if run.superscript else {})})
         return result
 
@@ -60,6 +65,8 @@ def display_document(library, paper_id):
             "latex": c.latex,
             "source_verified": c.source_verified,
             "caption_id": c.caption_id,
+            "group_role": c.group_role,
+            "language": c.language,
             "number": " ".join(spans[r]["text"] for r in c.number_refs),
             "image_url": asset(c.region) if c.region else None,
             "runs": runs(c.runs),
@@ -83,6 +90,8 @@ def display_document(library, paper_id):
                 "id": block.id,
                 "type": block.type,
                 "order": block.order,
+                "parent_id": block.parent_id,
+                "relations": [r.model_dump() for r in block.relations],
                 "validation_status": block.validation_status,
                 "source_regions": regions,
                 "source_error": source_error,

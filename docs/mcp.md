@@ -75,7 +75,7 @@ cd D:\project\18_pairper
 
 ChatGPT의 사용자 지정 MCP 등록 화면에서 기존 `pairper-local` 터널을 선택하는 작업은 사용자가 진행합니다. 터널 실행기를 켜 둔 상태에서 다음을 확인하세요.
 
-1. 도구 목록에서 Pairper 11개 도구 발견.
+1. 도구 목록에서 Pairper 13개 도구 발견.
 2. `list_papers` 결과와 실제 앱 라이브러리 비교.
 3. `get_page_image`의 PNG가 모델에 전달되는지 확인.
 4. 테스트 논문의 블록 저장·검증·확정 후 로컬 DB와 앱에서 결과 확인.
@@ -90,8 +90,27 @@ ChatGPT의 사용자 지정 MCP 등록 화면에서 기존 `pairper-local` 터�
 .\.venv\Scripts\python.exe -m pairper.mcp.server
 ```
 
-stdout은 MCP 전용입니다. 도구는 `list_papers`, `list_pending_papers`, `get_paper_manifest`, `get_page_content`, `get_page_image`, `get_region_image`, `begin_view_build`, `append_document_blocks`, `validate_view_build`, `finalize_view_build`, `get_build_report`입니다. 서버의 `update_papers` 프롬프트와 `pairper://document-schema` 리소스에 문서 계약이 있습니다.
+stdout은 MCP 전용입니다. 도구는 `list_papers`, `list_pending_papers`, `get_paper_manifest`, `get_page_content`, `get_page_evidence`, `get_reconstruction_guide`, `get_page_image`, `get_region_image`, `begin_view_build`, `append_document_blocks`, `validate_view_build`, `finalize_view_build`, `get_build_report`입니다. 서버의 `update_papers` 프롬프트와 `pairper://document-schema` 리소스에 문서 계약이 있습니다.
 
 페이지 번호는 1부터, 좌표는 회전 제거한 PDF point 기준 좌상단 원점입니다. 텍스트는 span refs로 연결하며 수식/표/그림에는 원본 영역을 지정합니다. `source_verified`와 `visual_review_pages`는 검토자의 진술이므로 자동 의미 보존 증명으로 간주하지 않습니다. 작업은 같은 ID로 재개·수정하고 검증 통과 후에만 확정합니다. 원본 PDF 삭제·임의 파일 읽기 도구는 없습니다.
 
 TextRun의 `join`은 한 run 내부의 `space`/`none`/`newline`/`dehyphenate` 정책입니다. 서로 다른 run 경계에는 `before: auto|none|space|newline`을 지정할 수 있습니다. 기본 `auto`는 원래 공백과 문장부호, 원문 좌표를 사용합니다. 의도적인 단어 결합·하이픈 제거는 해당 조각들을 하나의 run으로 묶어 정책을 지정하고 이력을 확인하세요.
+
+
+## 원본 근거 조회와 복합 영역 계약
+
+`get_paper_manifest.pdf_evidence`는 원본 북마크, XML 메타데이터, 첨부 파일명과 논리 구조 트리 존재 여부를 제공합니다. 태그가 있는 파일은 `requires_structure_reader`로 표시하며 지원하지 않는 논리 트리를 읽은 것으로 간주하지 않습니다.
+
+`get_page_evidence(paper_id, page, section, offset, limit)`의 section은 `summary`, `lines`, `characters`, `paths`, `links`, `annotations`, `table_candidates`입니다. limit은 1–200이며 next_offset이 null이 될 때까지 조회합니다. 문자별 위치와 도형의 세부 그리기 정보를 기존 원문 ID에 대응시키되 sources의 문자열·좌표·ID를 수정하지 않습니다. 캐시는 evidence에 별도로 저장합니다. 표 후보는 PyMuPDF가 추론한 값이며 검증된 셀로 취급하지 않습니다.
+
+`get_reconstruction_guide`와 서버의 업데이트 프롬프트가 프로그램과 AI의 역할을 설명합니다. 프로그램은 원본 근거 추출·명시적 선택 확장·출처 계산·구조 및 수식 문법 검사·렌더링을 담당합니다. 연결된 AI는 원본과 근거를 대조해 논리적 읽기 순서, 영역 역할·포함 관계, 수식·표의 구조와 애매한 전사를 판단합니다.
+
+문서 계약 1.1은 `group`과 `content.group_role`, `parent_id`, `relations`를 제공합니다. 그룹의 순서는 부모 다음에 자손이 연속하는 순서이며 빈 그룹·순환·끊긴 부모·잘못된 관계는 저장 검증에 실패합니다. 그룹은 라벨 외 자식 refs를 다시 선언하지 않습니다. 이전 1.0 문서는 계속 읽을 수 있습니다.
+
+`TextRun.ref_ranges`는 같은 페이지·추출 블록 내에서 first_ref부터 last_ref까지 선택한 명시적 범위입니다. refs와 동시에 지정하지 않습니다. 여러 단·페이지는 구간을 순서대로 나열하며, 프로그램이 범위를 refs로 확장해 저장합니다. source_refs를 생략하면 표시 refs와 실제 원본 영역에서 계산합니다. 잘못된 비어 있지 않은 출처 선언과 누락·중복은 계속 검증합니다.
+
+프롬프트·코드의 인쇄된 기호는 `literal=true`로 표시 정규화를 끌 수 있습니다. 코드는 원본 refs가 있으면 하나의 사각형 영역에 제한되지 않으며, 여러 페이지에 걸친 패널은 그룹과 자식 블록으로 표현합니다.
+
+저장 검증은 UI와 같은 KaTeX 0.19.0을 별도 Qt JavaScript 프로세스에서 실행합니다. 잘못된 LaTeX는 source_verified=true여도 완료되지 않습니다. 이 검사는 문법과 렌더 가능성만 검사하며 원본과 수학적 동치를 증명하지 않습니다. 이전 저장본의 이미지 호환 표시는 유지합니다.
+
+검토한 prompt/example/algorithm 그룹은 `content.source_regions`에 원본 테두리 영역 여러 개를 기록할 수 있습니다. 내부 텍스트가 실제 자식에 표시되는지 검사하고, 이 영역은 벡터 테두리 보존에만 사용하며 이미지 누락 검사를 대신하지 않습니다.

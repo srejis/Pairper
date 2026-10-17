@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import type { BlockContent, BlockType, DocumentBlock } from '../types';
-import { BlockView, Code, MathContent, Runs, SourceImage, Table } from './blocks';
+import { BlockView, Code, DocumentBlocks, MathContent, Runs, SourceImage, Table } from './blocks';
 
 const image = `file:///library/assets/${'a'.repeat(32)}.png`;
 const text = { kind: 'text' as const, prefix: '', text: 'Original 42 units.' };
@@ -9,6 +9,36 @@ const content: BlockContent = {
   runs: [text], items: [[text]], cells: [{ row: 0, column: 0, rowspan: 2, colspan: 3, header: true, runs: [text] }],
   level: 2, ordered: false, source_verified: true, image_url: image, latex: 'x=42', number: '(1)', caption_id: null,
 };
+
+describe('source-backed compound regions', () => {
+  it('renders nested proof content once in source order', () => {
+    const blocks: DocumentBlock[] = [
+      { id: 'proof', type: 'group', order: 0, validation_status: 'source_verified',
+        content: { ...content, runs: [], group_role: 'proof' } },
+      { id: 'p', type: 'paragraph', order: 1, parent_id: 'proof',
+        validation_status: 'source_verified', content },
+      { id: 'next', type: 'paragraph', order: 2, validation_status: 'source_verified',
+        content: { ...content, runs: [{ ...text, text: 'Next paragraph' }] } },
+    ];
+    const { container } = render(<DocumentBlocks blocks={blocks} />);
+    expect(container.querySelector('[data-group-role="proof"] [data-block-id="p"]')).toBeInTheDocument();
+    expect(screen.getAllByText('Original 42 units.')).toHaveLength(1);
+    expect(container.querySelector('[data-group-role="proof"] [data-block-id="next"]')).toBeNull();
+  });
+  it('shows an error for broken hierarchy without dropping or duplicating content', () => {
+    render(<DocumentBlocks blocks={[{ id: 'cycle', type: 'group', parent_id: 'cycle', order: 0,
+      validation_status: 'source_verified', content: { ...content, group_role: 'example' } }]} />);
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(screen.queryByText('Original 42 units.')).toBeNull();
+  });
+  it('preserves printed prompt symbols and inline emphasis as escaped text', () => {
+    const { container } = render(<Runs runs={[{ kind: 'text', prefix: '',
+      text: '<script>{user_task}</script> **printed**', bold: true, italic: true }]} />);
+    expect(container.querySelector('script')).toBeNull();
+    expect(container.querySelector('strong em, em strong')).toHaveTextContent('**printed**');
+    expect(container).toHaveTextContent('{user_task}');
+  });
+});
 describe('document rendering contract', () => {
   const types: BlockType[] = ['title','authors','heading','paragraph','list','equation','figure','table','caption','footnote','reference','source_region'];
   it.each(types)('renders %s without exposing internal source controls', type => {

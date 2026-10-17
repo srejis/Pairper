@@ -32,3 +32,8 @@ th { background: #f3f6f6; }
 .code-scroll{overflow-x:auto;max-width:100%}.code-content{white-space:pre;font-family:ui-monospace,Consolas,monospace;font-size:.875em;line-height:1.7;overflow-wrap:normal;margin:1em 0}.code-content .katex{white-space:nowrap}
 
 .table-scroll{position:relative}
+
+.block.group{margin:1em 0;min-width:0}.group-label{font-weight:600;margin:.7em 0}
+[data-group-role="prompt"],[data-group-role="example"]{background:#f3f6f6;padding:1em;border:1px solid #dce2e5;border-radius:6px}
+[data-group-role="proof"]{padding-left:1em;border-left:2px solid #dce2e5}
+[data-group-role="checklist_item"],[data-group-role="list_item"]{padding-left:1em}

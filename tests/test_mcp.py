@@ -12,7 +12,16 @@ async def test_mcp_tools_images_and_build(library, pdf_path):
     paper = library.register(pdf_path)
     async with Client(create_server(library)) as client:
         tools = await client.list_tools()
-        assert len(tools.tools) == 11
+        names = {tool.name for tool in tools.tools}
+        assert {"get_page_evidence", "get_reconstruction_guide", "finalize_view_build"} <= names
+        guide = await client.call_tool("get_reconstruction_guide", {})
+        assert not guide.is_error and "source_verified=false" in str(guide.content)
+        evidence = await client.call_tool("get_page_evidence", {
+            "paper_id": paper["id"], "page": 1, "section": "characters", "limit": 2,
+        })
+        assert not evidence.is_error
+        assert len(evidence.structured_content["items"]) == 2
+        assert evidence.structured_content["next_offset"] == 2
         result = await client.call_tool("list_pending_papers", {})
         assert not result.is_error
         image = await client.call_tool("get_page_image", {"paper_id": paper["id"], "page": 1})

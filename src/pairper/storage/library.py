@@ -12,6 +12,16 @@ from pathlib import Path
 from platformdirs import user_data_path
 
 from pairper.document.models import Block, Document, Omission, Region
+from pairper.document.provenance import expected_refs, materialize_ranges
+from pairper.pdf.evidence import (
+    EVIDENCE_VERSION,
+    RUNTIME_VERSION,
+    document_evidence,
+    evidence_page,
+    page_evidence,
+    source_fingerprint,
+    table_candidates,
+)
 from pairper.pdf.source import (
     EXTRACTOR_VERSION,
     extract,
@@ -50,7 +60,7 @@ class Library:
             or os.environ.get("PAIRPER_DATA_DIR")
             or user_data_path("Pairper", appauthor=False) / "library"
         ).resolve()
-        for folder in ("originals", "sources", "views", "assets", "staging"):
+        for folder in ("originals", "sources", "views", "assets", "staging", "evidence"):
             (self.root / folder).mkdir(parents=True, exist_ok=True)
         self.db = self.root / "library.db"
         with self.connect() as con:
@@ -186,6 +196,7 @@ class Library:
         return {
             **paper,
             "metadata": source["metadata"],
+            "pdf_evidence": document_evidence(self.managed(paper["original_path"]), paper["sha256"]),
             "pages": [
                 {
                     "page": p["page"],
@@ -211,6 +222,30 @@ class Library:
         return render(
             self.managed(paper["original_path"]), self.source(paper_id), page, region, scale
         )
+
+    def page_evidence(self, paper_id, page, section="summary", offset=0, limit=100):
+        # source() checks the original hash even when the supplemental cache already exists.
+        from pairper.pdf.evidence import SECTIONS
+
+        if section not in SECTIONS | {"summary"} or offset < 0 or not 1 <= limit <= 200:
+            raise ValueError("Invalid evidence section, offset or limit")
+        paper = self.paper(paper_id)
+        source = self.source(paper_id)
+        if not 1 <= page <= len(source["pages"]):
+            raise ValueError("Page outside document")
+        original = source["pages"][page - 1]
+        cache = self.managed(f"evidence/{paper_id}-p{page}-v{EVIDENCE_VERSION}.json")
+        data = json.loads(cache.read_text("utf-8")) if cache.exists() else None
+        fingerprint = source_fingerprint(original)
+        if not data or data.get("pymupdf_version") != RUNTIME_VERSION or data.get("source_sha256") != paper["sha256"] or (
+            data.get("source_fingerprint") != fingerprint
+        ):
+            data = page_evidence(self.managed(paper["original_path"]), paper["sha256"], original)
+            write_json(cache, data)
+        if section == "table_candidates" and section not in data:
+            data[section] = table_candidates(self.managed(paper["original_path"]), original)
+            write_json(cache, data)
+        return evidence_page(data, section, offset, limit)
 
     def asset(self, paper_id: str, region: Region):
         key = uuid.uuid5(uuid.NAMESPACE_URL, paper_id + region.model_dump_json()).hex
@@ -286,13 +321,21 @@ class Library:
             if job["stage"] == "finalized":
                 raise ValueError("Build already finalized")
             doc = Document.model_validate_json(job["document"])
+            source = self.source(doc.paper_id)
             # Same IDs replace in place for repairs and idempotent retried batches.
             existing = {b.id: b for b in doc.blocks}
             for block_id in remove_block_ids or []:
                 existing.pop(block_id, None)
             for block in blocks:
+                # The builder selects content. Code expands only explicit ranges and computes
+                # the redundant coverage declaration. Incorrect nonempty claims still fail.
+                materialize_ranges(block, source)
+                if not block.source_refs:
+                    block.source_refs = expected_refs(block, source)
                 existing[block.id] = block
             doc.blocks = list(existing.values())
+            if any(b.type == "group" or b.parent_id or b.relations for b in doc.blocks):
+                doc.schema_version = "1.1"
             omit = {o.ref: o for o in doc.omissions}
             for ref in remove_omission_refs or []:
                 omit.pop(ref, None)
@@ -308,6 +351,7 @@ class Library:
         return {"blocks": len(doc.blocks), "job_id": job_id}
 
     def validate(self, job_id, finalize=False):
+        from pairper.document.mathcheck import check_document_math
         from pairper.document.renderer import render_document
         from pairper.validation.checks import validate_document
 
@@ -320,6 +364,10 @@ class Library:
             fatal_error = None
             try:
                 report = validate_document(self, doc)
+                if report["valid"]:
+                    report["math_render"] = check_document_math(doc)
+                    report["errors"].extend(report["math_render"]["errors"])
+                    report["valid"] = not report["errors"]
                 if report["valid"]:
                     render_document(self, doc, self.managed(f"staging/{job_id}.html"))
             except (ValueError, OSError, RuntimeError) as exc:

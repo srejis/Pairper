@@ -16,9 +16,7 @@ def resolve_text(run, spans, audit):
     for text in originals[1:]:
         if run.join == "dehyphenate" and result.endswith("-"):
             result = result[:-1] + text
-        elif run.join == "dehyphenate" and result.endswith(("´", "˜", "¨")):
-            result += text
-        elif separator == " " and (
+        elif run.join == "dehyphenate" and result.endswith(("´", "˜", "¨")) or separator == " " and (
             result.endswith((" ", "\n", "\t")) or text.startswith((" ", "\n", "\t"))
         ):
             result += text
@@ -26,9 +24,9 @@ def resolve_text(run, spans, audit):
             result += separator + text
     # Observed TeX PDF extraction: spacing accents precede Latin letters / dotless i.
     composed = result
-    for extracted, displayed in (("´ı", "í"), ("´e", "é"), ("´a", "á"),
+    for extracted, displayed in (() if run.literal else (("´ı", "í"), ("´e", "é"), ("´a", "á"),
                                  ("´o", "ó"), ("˜n", "ñ"), ("¨ı", "ï"),
-                                 ("¨u", "ü"), ("´E", "É")):
+                                 ("¨u", "ü"), ("´E", "É"))):
         composed = composed.replace(extracted, displayed)
     if composed != result:
         audit.append({"refs": run.refs, "original_strings": originals,

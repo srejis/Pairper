@@ -11,30 +11,57 @@ from mcp.server.mcpserver.exceptions import ToolError
 from pairper.document.models import Block, Document, Omission, Region
 from pairper.storage.library import Library
 
-WORKFLOW = """Pairper 논문 업데이트 절차:
-1. list_pending_papers로 새 대상을 찾는다. 기존 뷰의 실제 오류를 수정하는 명시적 작업은
-begin_view_build(revise_existing=true)로 이전 문서의 별도 교정본을 만든다. 원본과 이전 뷰는 보존한다.
-2. get_paper_manifest, 모든 get_page_content와 get_page_image를 읽는다.
-이미지가 모델에 전달되지 않으면 중단하고 연결 문제를 보고한다.
-3. document_schema 리소스를 읽는다. 원문을 요약/번역/의역하지 않는다.
-텍스트는 runs의 refs로 연결한다. PDF에서 문자 대신 선으로 그린 밑줄처럼 원본 추출이
-실제로 손실한 문자는 원본 대조 후에만 text_override와 source_verified=true로 복원한다.
-원본 refs는 유지하며 요약이나 의역에는 사용하지 않는다. 각주 표지는 text run의
-superscript=true로 표시한다. 문단을 단과 페이지 경계를 넘어 재구성한다.
-그림/벡터 도식은 이미지로 보존할 수 있다. 수식은 원본과 대조한 LaTeX로, 표는 행·열·
-병합 셀 및 셀의 원문 refs/수식을 보존하여 구조화한다. 수식·표 이미지는 완료로 인정하지
-않는다. 알고리즘·코드는 code의 code_lines에 원본 들여쓰기와 refs/LaTeX를 보존한다.
-불확실한 내용은 추측하지 않고 검토 중인 빌드에 남긴다. 본문·수식·표를 그림이나
-source_region으로 바꾸어 우회하지 않는다. 작은 원본 영역에서 기호와 숫자를 대조한다.
-4. begin_view_build 후 append_document_blocks로 배치 저장한다. 같은 블록 ID는 수정한다.
-source_refs는 실제 표시 텍스트 ID와 원본 영역에 완전히 포함된 텍스트 ID의 합집합이다.
-각 페이지를 시각 검토한 후 visual_review_pages에 기록한다. 이는 검토자의 진술이다.
-생략은 장식적 페이지 번호/반복 머리말/꼬리말만 허용하며 omissions에 근거를 기록한다.
-5. validate_view_build와 get_build_report에서 오류를 확인하고 같은 ID로 수정한다.
-finalize_view_build가 성공하고 실제 렌더링도 확인했을 때만 완료를 보고한다.
-수식·표의 미검증 이미지 대체는 저장 검증을 통과하지 않는다.
-6. 새 완료 수, 기존 완료 수, 검토 필요 수를 구분해 보고한다. 자동 검증이 의미적
-동일성이나 읽기 순서를 증명한다고 주장하지 않는다.
+WORKFLOW = """Pairper 원본 기반 논문 재구성 절차:
+1. list_pending_papers로 대상을 찾는다. 명시적 교정은 begin_view_build(revise_existing=true)를
+사용하며 원본과 이전 뷰를 보존한다. 먼저 get_reconstruction_guide와 document_schema를 읽는다.
+2. get_paper_manifest의 pdf_evidence에서 원본 목차·링크 목적지·논리 구조 존재 여부를 확인한다.
+모든 페이지의 get_page_content, get_page_evidence(summary/lines), get_page_image를 확인한다.
+원본 이미지가 전달되지 않으면 완료를 주장하지 않고 연결 문제를 보고한다. 모호한 문자·공백·
+그림 경계는 characters/paths/links와 get_region_image로 확인한다. table_candidates는 추론
+후보이지 원본에 명시된 셀이나 검증된 표가 아니다. next_offset이 있으면 끝까지 페이지네이션한다.
+3. 프로그램은 문자·배치·도형·목차·링크 추출, 선택 구간 확장, 출처 계산, 검증·표시를 맡는다.
+AI는 원본 근거로 읽기 순서, 문단/단/페이지 연결, 영역의 역할·포함 관계를 결정한다.
+추출 block/line을 의미적 문단으로 간주하지 않는다. PDF에 없는 역할을 억지로 추정하지 않는다.
+4. 텍스트는 runs.refs 또는 명시적 ref_ranges(first_ref,last_ref)로 선택한다. 범위 하나는
+같은 페이지·추출 블록 내부의 정방향 구간이다. 페이지/단을 넘으면 선택 구간을 순서대로 나열한다.
+source_refs를 생략하면 프로그램이 실제 표시 refs와 영역에서 계산한다. 단어·문단을 요약/의역하지
+않는다. 원본 추출이 실제로 손실한 문자만 원본 대조 후 text_override/source_verified로 전사한다.
+5. group과 parent_id로 정리·정의·증명·프롬프트·예시·체크리스트·목록 항목을 묶는다.
+그룹은 자식 내용을 source_refs에 재선언하지 않는다. order는 부모 먼저, 자손이 연속하는 읽기
+순서다. relations로 증명 대상·캡션 대상·각주를 연결한다. group 자체는 이미지 대체 수단이 아니다.
+6. 실제 도식·사진·그래프만 figure로 보존한다. Figure 번호가 붙은 프롬프트도 읽을 수 있는
+텍스트/코드로 구조화한다. 수식은 원본과 대조한 LaTeX, 표는 행·열·병합 셀과 refs/수식으로 작성한다.
+알고리즘은 algorithm 그룹 안에 코드 행·문단 등을 두고, 실제 코드는 code_lines로 들여쓰기·빈 줄을
+보존한다. 프롬프트/코드의 원문 기호는 literal=true로 보존한다. 하이픈은 일괄 삭제하지 않는다.
+7. begin_view_build 후 append_document_blocks로 배치 저장한다. 같은 ID는 수정된다.
+시각 검토 후에만 visual_review_pages를 기록한다. source_verified는 원본 대조 진술이지 프로그램의
+문법 통과 결과가 아니다. 생략은 장식적 페이지 번호/반복 머리말/꼬리말만 근거와 함께 기록한다.
+8. validate_view_build/get_build_report로 refs·좌표·그룹/연결·표 셀과 실제 KaTeX 문법 검사를
+확인하고 오류를 교정한다. 프로그램의 검사는 읽기 순서·문단 경계·수식 의미 동치를 증명하지 않는다.
+finalize 성공과 실제 읽기 화면의 구조·표시 확인 후에만 완료를 보고한다. 새 완료/기존 완료/검토 필요를
+구분한다. 수식·표·본문을 이미지로 우회하거나 불확실한 부분을 추측해서 완료하지 않는다.
+"""
+
+RECONSTRUCTION_GUIDE = """원본 위치와 읽기 단위는 다르다.
+프로그램 근거: pdf_evidence의 목차·태그 존재 여부는 원본 정보다. page_evidence의 lines와
+characters는 추출기의 기하 정보이고 의미 문단이 아니다. paths는 PDF 그리기 연산이다.
+table_candidates는 라이브러리 추론이며 source_verified=false다. 논리 태그가 없다고 문서 구조가
+없는 것은 아니며, 태그가 있더라도 지원되지 않는 구조를 읽었다고 주장하지 않는다.
+읽기 단위: title/authors/heading/paragraph/list/equation/figure/table/caption/footnote/reference/code.
+복합 group_role: section/front_matter/theorem/definition/lemma/fact/remark/proof/prompt/example/
+checklist/checklist_item/algorithm/figure_group/table_group/list_item.
+그룹은 c.runs로 원본 제목을 선택할 수 있고 내용은 parent_id를 가진 자식 블록에 둔다.
+그룹의 라벨에 쓴 refs를 자식에서 다시 쓰지 않는다. 자식이 없거나 순환·비연속인 그룹은 실패한다.
+본문·표 셀·목록 속 긴 문단/수식은 group(list_item 등) 아래에 필요한 블록들을 순서대로 둔다.
+동일 ID 블록을 두 부모 밑에 중복 렌더하지 않는다. 표는 셀의 행/열/병합 관계를 보존한다.
+프롬프트/예시/알고리즘의 테두리 영역은 group.content.source_regions에 둘 수 있으나
+source_verified=true와 모든 내부 텍스트의 자식 표시를 요구한다. 이 영역으로 이미지를 가릴 수 없다.
+relations는 {kind: caption_of|proof_of|footnote_for|refers_to, target_id: 블록ID} 배열이다.
+옛 caption_id도 읽을 수 있다. Figure/Table 원래 번호·캡션 위치는 원문대로 유지한다.
+여러 페이지의 프롬프트·코드·증명은 그룹 하나와 여러 원본 기반 자식으로 표현한다.
+일반 강조·각주 표식은 TextRun.bold/italic/underline/superscript, literal은 문자 정규화를 끈다.
+ref_ranges는 추출 순서를 새 읽기 순서라고 추정하지 않고 AI가 선택한 구간만 확장한다.
+source_refs 생략은 편의 기능이며 실제 표시 원문 누락/중복 검사를 약화하지 않는다.
 """
 
 
@@ -89,6 +116,22 @@ def create_server(library: Library | None = None):
     def get_page_content(paper_id: str, page: int) -> dict[str, Any]:
         """Read original span IDs/text/coordinates/fonts/directions. Page numbers start at 1."""
         return library.page_content(paper_id, page)
+
+    @tool()
+    def get_reconstruction_guide() -> str:
+        """Read program/AI responsibilities and source-backed group/selection contracts."""
+        return RECONSTRUCTION_GUIDE
+
+    @tool()
+    def get_page_evidence(
+        paper_id: str, page: int, section: str = "summary", offset: int = 0, limit: int = 100
+    ) -> dict[str, Any]:
+        """Read bounded PDF evidence: summary/lines/characters/paths/links/annotations/table_candidates.
+
+        Follow next_offset until null. Tables are inferred proposals requiring source review.
+        Source text IDs and previous views are never rewritten by evidence extraction.
+        """
+        return library.page_evidence(paper_id, page, section, offset, limit)
 
     @tool()
     def get_page_image(paper_id: str, page: int) -> types.ImageContent:

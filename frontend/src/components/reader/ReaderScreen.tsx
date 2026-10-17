@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DisplayDocument, PairperApi, Paper } from '../../types';
-import { BlockView } from '../blocks';
+import { DocumentBlocks } from '../blocks';
 import { Overlay } from '../common/Overlay';
 import { Icon } from '../common/Icon';
 import { paperTitle } from '../library/LibraryScreen';
@@ -19,7 +19,7 @@ export function ReaderScreen({ api, paper, onBack }: { api: PairperApi; paper: P
     setDocument(null); setError(''); setTocOpen(false);
     if (!paper.has_view) { setError('유효한 저장 문서가 없습니다. 라이브러리에서 다시 확인해 주세요.'); return; }
     void api.getDocument(paper.id).then(data => {
-      if (data.display_schema_version !== '1.0' || data.source_schema_version !== '1.0') throw new Error('지원하지 않는 문서 버전입니다.');
+      if (data.display_schema_version !== '1.0' || !['1.0', '1.1'].includes(data.source_schema_version)) throw new Error('지원하지 않는 문서 버전입니다.');
       if (active) setDocument(data);
     }).catch(() => { if (active) setError('문서를 열지 못했습니다. 원본 PDF와 저장 문서를 확인해 주세요.'); });
     return () => { active = false; };
@@ -56,7 +56,7 @@ export function ReaderScreen({ api, paper, onBack }: { api: PairperApi; paper: P
     </header>
     <main ref={reader} className="reader" aria-label="논문 읽기">
       {document ? <article className="paper-document" aria-label="재구성된 논문">
-        {document.blocks.map(block => <BlockView key={block.id} block={block} />)}
+        <DocumentBlocks blocks={document.blocks} />
       </article> : <div className="empty-state" role={error ? 'alert' : 'status'}><h1>{error ? '문서를 열 수 없습니다' : '문서를 여는 중…'}</h1><p>{error}</p></div>}
     </main>
     {tocOpen ? <Overlay label="목차" onClose={() => setTocOpen(false)}>

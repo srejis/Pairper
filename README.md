@@ -75,10 +75,10 @@ uv run pairper --import-pdf 'C:\papers\paper.pdf'
 | `document/presentation.py`, `text.py` | 버전이 있는 표시 데이터와 공통 원문 연결 정책 |
 | `document/comparison.py` | 저장된 블록·영역 ID 기반 원본 PDF 대조, 좌표·해시·이미지 크기 검증 |
 | `validation/checks.py` | 원문 누락/중복, 잘못된 참조, 해시, 시각 영역, 표 겹침 검사 |
-| `mcp/server.py` | GUI 독립 stdio MCP, 11개 도구, JSON Schema 리소스, 업데이트 프롬프트 |
-| `web/` | 로컬 CSS/JS, KaTeX 0.16.22 및 글꼴 |
+| `mcp/server.py` | GUI 독립 stdio MCP, 13개 도구, JSON Schema 리소스, 업데이트 프롬프트 |
+| `web/` | 로컬 CSS/JS, KaTeX 0.19.0 및 글꼴 |
 
-Python 모듈은 `src/pairper/`, 프론트엔드 소스는 `frontend/` 아래에 있습니다. 데이터는 `originals/`, `sources/`, `views/`, `assets/`, `staging/`, `library.db`로 구분합니다. DB가 작업의 기준 데이터이며 staging JSON은 복구용 스냅샷입니다. 각 뷰의 `.normalization.json` 및 표시 데이터의 `normalization_audit`에는 줄 결합 전 원문과 결과를 보존합니다.
+Python 모듈은 `src/pairper/`, 프론트엔드 소스는 `frontend/` 아래에 있습니다. 데이터는 `originals/`, `sources/`, `views/`, `assets/`, `evidence/`, `staging/`, `library.db`로 구분합니다. DB가 작업의 기준 데이터이며 staging JSON은 복구용 스냅샷입니다. 각 뷰의 `.normalization.json` 및 표시 데이터의 `normalization_audit`에는 줄 결합 전 원문과 결과를 보존합니다.
 
 ## 검증
 

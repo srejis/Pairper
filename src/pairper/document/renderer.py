@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 
 from pairper.document.models import Document, MathRun
+from pairper.document.structure import block_tree
 from pairper.document.text import resolve_text, resolved_runs
 
 WEB = Path(__file__).resolve().parents[1] / "web"
@@ -47,14 +48,22 @@ def render_document(library, doc: Document, output: Path):
             if isinstance(run, MathRun):
                 parts.append(math(run.latex, run.region, run.source_verified, False))
             else:
-                parts.append(f"<sup>{esc(text)}</sup>" if run.superscript else esc(text))
+                text = esc(text)
+                for enabled, tag in ((run.bold, "strong"), (run.italic, "em"),
+                                     (run.underline, "u"), (run.superscript, "sup")):
+                    if enabled:
+                        text = f"<{tag}>{text}</{tag}>"
+                parts.append(text)
         return "".join(parts)
 
-    bodies = []
+    tree = block_tree(doc.blocks)
+    bodies = {}
     for block in sorted(doc.blocks, key=lambda b: b.order):
         c = block.content
         body = runs(c.runs)
-        if block.type == "title":
+        if block.type == "group":
+            body = f'<div class="group-label">{body}</div>' if body else ""
+        elif block.type == "title":
             body = f"<h1>{body}</h1>"
         elif block.type == "heading":
             body = f"<h{c.level}>{body}</h{c.level}>"
@@ -92,7 +101,18 @@ def render_document(library, doc: Document, output: Path):
                 body = '<div class="source-scroll" role="region" aria-label="논문 내용" tabindex="0">' + body + "</div>"
         else:
             body = f"<p>{body}</p>"
-        bodies.append(f'<section id="{esc(block.id)}" class="block {block.type}">{body}</section>')
+        bodies[block.id] = body
+
+    def sections(parent=None):
+        output = []
+        for block in tree.get(parent, []):
+            body = bodies[block.id]
+            if block.type == "group":
+                body += sections(block.id)
+            role = f' data-group-role="{esc(block.content.group_role)}"' if block.type == "group" else ""
+            output.append(f'<section id="{esc(block.id)}" class="block {block.type}"{role}>'
+                          f'{body}</section>')
+        return "".join(output)
     css = (WEB / "reader.css").as_uri()
     katex_css = (WEB / "katex/katex.min.css").as_uri()
     katex_js = (WEB / "katex/katex.min.js").as_uri()
@@ -107,7 +127,7 @@ def render_document(library, doc: Document, output: Path):
         f'<link rel="stylesheet" href="{esc(katex_css)}">'
         f'<script defer src="{esc(katex_js)}"></script>'
         f'<script defer src="{esc(reader_js)}"></script><title>Pairper</title></head>'
-        "<body><main>" + "".join(bodies) + "</main></body></html>"
+        "<body><main>" + sections() + "</main></body></html>"
     )
     temp = output.with_name(output.name + "." + uuid.uuid4().hex + ".tmp")
     temp.write_text(document, encoding="utf-8")

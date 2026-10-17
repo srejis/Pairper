@@ -1,4 +1,4 @@
-import { Fragment, type ComponentType } from 'react';
+import { Fragment, useMemo, type ComponentType, type ReactNode } from 'react';
 import katex from 'katex';
 import type { BlockContent, BlockType, DocumentBlock, Run } from '../types';
 
@@ -26,9 +26,18 @@ export function MathContent({ latex, verified, image, display = false }: {
 
 export function Runs({ runs }: { runs: Run[] }) {
   return runs.map((run, index) => <Fragment key={index}>
-    {run.prefix}{run.kind === 'text' ? (run.superscript ? <sup>{run.text}</sup> : run.text) : <MathContent latex={run.latex}
+    {run.prefix}{run.kind === 'text' ? <StyledText run={run} /> : <MathContent latex={run.latex}
       verified={run.source_verified} image={run.image_url} />}
   </Fragment>);
+}
+
+function StyledText({ run }: { run: Extract<Run, { kind: 'text' }> }) {
+  let body: ReactNode = run.text;
+  if (run.bold) body = <strong>{body}</strong>;
+  if (run.italic) body = <em>{body}</em>;
+  if (run.underline) body = <u>{body}</u>;
+  if (run.superscript) body = <sup>{body}</sup>;
+  return body;
 }
 
 type Props = { content: BlockContent };
@@ -70,7 +79,7 @@ export const SourceRegion = ({ content }: Props) => <div className="source-scrol
 
 export function Code({ content }: Props) {
   const lines = content.code_lines ?? [];
-  return <div className="code-scroll"><pre className="code-content"><code>
+  return <div className="code-scroll"><pre className="code-content"><code data-language={content.language ?? undefined}>
     {lines.map((line, index) => <Fragment key={index}>
       {' '.repeat(line.indent)}<Runs runs={line.runs} />{index < lines.length - 1 ? '\n' : ''}
     </Fragment>)}
@@ -81,11 +90,48 @@ const renderers: Record<BlockType, ComponentType<Props>> = {
   title: Title, authors: Authors, heading: Heading, paragraph: Paragraph, list: List,
   equation: Equation, figure: Figure, table: Table, caption: Caption, footnote: Footnote,
   reference: Reference, source_region: SourceRegion, code: Code,
+  group: ({ content }) => content.runs.length ? <div className="group-label"><Runs runs={content.runs} /></div> : null,
 };
-export function BlockView({ block }: { block: DocumentBlock }) {
+export function BlockView({ block, children }: { block: DocumentBlock; children?: ReactNode }) {
   const Component = renderers[block.type];
   return <section id={`block-${block.id}`} className={`document-block ${block.type}`}
-    data-block-type={block.type} data-block-id={block.id}>
-    <div className="block-body"><Component content={block.content} /></div>
+    data-block-type={block.type} data-block-id={block.id}
+    data-group-role={block.content.group_role ?? undefined}>
+    <div className="block-body"><Component content={block.content} />{children}</div>
   </section>;
+}
+
+type RenderNode = { block: DocumentBlock; children: RenderNode[] };
+
+function buildTree(blocks: DocumentBlock[]): RenderNode[] {
+  const ordered = [...blocks].sort((a, b) => a.order - b.order);
+  const nodes = new Map<string, RenderNode>();
+  const roots: RenderNode[] = [];
+  const stack: RenderNode[] = [];
+  for (const block of ordered) {
+    if (nodes.has(block.id)) throw new Error('문서에 중복된 영역이 있습니다.');
+    const node: RenderNode = { block, children: [] };
+    const parent = block.parent_id ? nodes.get(block.parent_id) : undefined;
+    if (block.parent_id && (!parent || parent.block.type !== 'group')) throw new Error('영역의 연결을 확인할 수 없습니다.');
+    while (stack.length && stack[stack.length - 1] !== parent) stack.pop();
+    if (parent && stack[stack.length - 1] !== parent) throw new Error('영역 순서가 올바르지 않습니다.');
+    (parent ? parent.children : roots).push(node);
+    nodes.set(block.id, node);
+    if (block.type === 'group') stack.push(node);
+    if (stack.length > 32) throw new Error('영역의 중첩이 너무 깊습니다.');
+  }
+  return roots;
+}
+
+function NodeView({ node }: { node: RenderNode }) {
+  return <BlockView block={node.block}>{node.children.map(child => <NodeView key={child.block.id} node={child} />)}</BlockView>;
+}
+
+export function DocumentBlocks({ blocks }: { blocks: DocumentBlock[] }) {
+  const result = useMemo(() => {
+    try { return { nodes: buildTree(blocks), error: '' }; }
+    catch { return { nodes: [], error: '문서 영역의 연결이 올바르지 않아 표시할 수 없습니다.' }; }
+  }, [blocks]);
+  return result.error ? <p role="alert">{result.error}</p>
+    : result.nodes.map(node => <NodeView key={node.block.id} node={node} />);
 }

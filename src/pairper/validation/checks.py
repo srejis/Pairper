@@ -1,21 +1,14 @@
 import re
 from collections import Counter
 
-from pairper.document.models import Document, MathRun, TextRun, rendered_refs
+from pairper.document.models import Document, MathRun, TextRun
+from pairper.document.provenance import contains, expected_refs
+from pairper.document.structure import structure_errors
 from pairper.pdf.source import check_region
 
 
-def contains(outer, inner):
-    return (
-        outer[0] <= inner[0] + 0.25
-        and outer[1] <= inner[1] + 0.25
-        and outer[2] >= inner[2] - 0.25
-        and outer[3] >= inner[3] - 0.25
-    )
-
-
 def validate_document(library, doc: Document):
-    errors, warnings = [], []
+    errors, warnings = structure_errors(doc.blocks), []
     paper = library.paper(doc.paper_id)
     if doc.source_sha256 != paper["sha256"]:
         errors.append("Source hash mismatch")
@@ -24,6 +17,36 @@ def validate_document(library, doc: Document):
     used = Counter()
     regions = []
     verified_text_bounds = []
+    group_decoration_regions = []
+    if not errors:
+        children = {}
+        for block in doc.blocks:
+            children.setdefault(block.parent_id, []).append(block)
+
+        def descendant_refs(block):
+            refs = set(expected_refs(block, source))
+            for child in children.get(block.id, []):
+                refs.update(descendant_refs(child))
+            return refs
+
+        for block in doc.blocks:
+            for region in block.content.source_regions:
+                try:
+                    check_region(source, region)
+                except ValueError as exc:
+                    errors.append(f"{block.id}: {exc}")
+                    continue
+                page = source["pages"][region.page - 1]
+                enclosed = {s["id"] for s in page["spans"] if contains(region.bbox, s["bbox"])}
+                if not enclosed <= descendant_refs(block):
+                    errors.append(f"{block.id}: source region contains text absent from the group")
+                    continue
+                if (region.bbox[2] - region.bbox[0]) * (region.bbox[3] - region.bbox[1]) > (
+                    page["width"] * page["height"] * .9
+                ):
+                    errors.append(f"{block.id}: full-page group region is not allowed")
+                    continue
+                group_decoration_regions.append(region)
     ids = [b.id for b in doc.blocks]
     if not doc.blocks:
         errors.append("Document has no blocks")
@@ -35,7 +58,7 @@ def validate_document(library, doc: Document):
     for block in doc.blocks:
         c = block.content
         block.validation_status = "source_verified"
-        expected = rendered_refs(block)
+        expected = expected_refs(block, source)
         own_regions = [c.region] if c.region else []
         runs = list(c.runs) + [r for item in c.items for r in item]
         runs += [r for cell in c.cells for r in cell.runs]
@@ -59,20 +82,6 @@ def validate_document(library, doc: Document):
             area = (region.bbox[2] - region.bbox[0]) * (region.bbox[3] - region.bbox[1])
             if page_info["spans"] and area > page_info["width"] * page_info["height"] * 0.9:
                 errors.append(f"{block.id}: full-page fallback is only allowed for textless pages")
-            # The source image preserves enclosed text even when glyph extraction is poor.
-            enclosed = [
-                ref
-                for ref, (page, s) in spans.items()
-                if page == region.page and (
-                    contains(region.bbox, s["bbox"])
-                    or (block.type == "figure" and contains(
-                        region.bbox, page_info.get("text_paint_bounds", {}).get(
-                            ref, page_info.get("rotated_glyph_bounds", {}).get(ref, s["bbox"])
-                        ),
-                    ))
-                )
-            ]
-            expected += [ref for ref in enclosed if ref not in expected]
         if set(block.source_refs) != set(expected):
             errors.append(f"{block.id}: source_refs must match displayed text and enclosed regions")
         if len(block.source_refs) != len(set(block.source_refs)):
@@ -108,6 +117,8 @@ def validate_document(library, doc: Document):
                             errors.append(f"{block.id}: overlapping table cells")
                         occupied.add((row, col))
         for run in runs:
+            if isinstance(run, TextRun) and run.ref_ranges:
+                errors.append(f"{block.id}: source ranges must be materialized before validation")
             if isinstance(run, MathRun):
                 for ref in run.refs:
                     if ref in spans and (
@@ -158,6 +169,9 @@ def validate_document(library, doc: Document):
                 continue
             if not (
                 any(r.page == p["page"] and contains(r.bbox, box) for r in regions)
+                or (item in p["drawings"] and any(
+                    r.page == p["page"] and contains(r.bbox, box) for r in group_decoration_regions
+                ))
                 or (item in p["drawings"] and any(
                     page == p["page"] and contains(bounds, box)
                     for page, bounds in verified_text_bounds

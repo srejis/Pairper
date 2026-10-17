@@ -13,7 +13,7 @@ def block_regions(block, source, spans=None):
     if spans is None:
         spans = {s["id"]: {**s, "page": p["page"]} for p in source["pages"] for s in p["spans"]}
     content = block.content
-    regions = [content.region] if content.region else []
+    regions = ([content.region] if content.region else []) + list(content.source_regions)
     runs = content.runs + [r for item in content.items for r in item]
     runs += [r for line in content.code_lines for r in line.runs]
     if block.type == "table" and content.source_verified:
