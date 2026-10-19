@@ -56,7 +56,12 @@ export const Equation = ({ content }: Props) => <div className="equation-scroll"
   <MathContent latex={content.latex} verified={content.source_verified} image={content.image_url} display />
   {content.number ? <span className="equation-number">{content.number}</span> : null}
 </div>;
-export const Figure = ({ content }: Props) => <figure aria-describedby={content.caption_id ? `block-${content.caption_id}` : undefined}><SourceImage url={content.image_url} /></figure>;
+export const Figure = ({ content }: Props) => <figure aria-describedby={content.caption_id ? `block-${content.caption_id}` : undefined}>
+  <SourceImage url={content.image_url} />
+  {content.translation_labels?.length ? <details className="figure-translations"><summary>그림 안의 한국어 번역</summary>
+    <dl>{content.translation_labels.map((label, index) => <div key={index}><dt>{label.source}</dt><dd>{label.target}</dd></div>)}</dl>
+  </details> : null}
+</figure>;
 export function Table({ content }: Props) {
   if (!content.source_verified || !content.cells.length) return <div className="source-scroll" role="region" aria-label="논문 표" tabIndex={0}><SourceImage url={content.image_url} /></div>;
   const rows = new Map<number, typeof content.cells>();

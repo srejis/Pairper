@@ -8,6 +8,8 @@ interface QtBridge {
   reply: QtSignal; libraryChanged: QtSignal; connectionChanged: QtSignal;
   listPapers(id: string): void;
   getDocument(id: string, paperId: string): void;
+  listTranslations(id: string, paperId: string): void;
+  getTranslationDocument(id: string, sessionId: string): void;
   connectionStatus(id: string): void;
   importPdfs(id: string): void;
   openDiagnostics(id: string): void;
@@ -45,12 +47,14 @@ export function connectBridge(): Promise<PairperApi> {
           else item.reject(new Error(result.error));
         } catch { item.reject(new Error('데스크톱 응답 형식을 확인할 수 없습니다.')); }
       });
-      function call<T>(method: 'listPapers' | 'getDocument' | 'connectionStatus' | 'importPdfs' | 'openDiagnostics' | 'reconnectTunnel' | 'autostartStatus' | 'setAutostart' | 'copyUpdateRequest', argument?: string | boolean): Promise<T> {
+      function call<T>(method: 'listPapers' | 'getDocument' | 'listTranslations' | 'getTranslationDocument' | 'connectionStatus' | 'importPdfs' | 'openDiagnostics' | 'reconnectTunnel' | 'autostartStatus' | 'setAutostart' | 'copyUpdateRequest', argument?: string | boolean): Promise<T> {
         const id = `${method === 'importPdfs' ? 'import' : 'request'}_${++sequence}`;
         return new Promise((res, rej) => {
           const timer = setTimeout(() => { pending.delete(id); rej(new Error('데스크톱 응답이 지연되고 있습니다.')); }, method === 'importPdfs' ? 600000 : 60000);
           pending.set(id, { resolve: data => res(data as T), reject: rej, timer });
           if (method === 'getDocument') bridge.getDocument(id, argument as string);
+          else if (method === 'listTranslations') bridge.listTranslations(id, argument as string);
+          else if (method === 'getTranslationDocument') bridge.getTranslationDocument(id, argument as string);
           else if (method === 'copyUpdateRequest') bridge.copyUpdateRequest(id, argument as string);
           else if (method === 'setAutostart') bridge.setAutostart(id, argument as boolean);
           else bridge[method](id);
@@ -62,6 +66,8 @@ export function connectBridge(): Promise<PairperApi> {
         setAutostart: enabled => call('setAutostart', enabled),
         listPapers: () => call('listPapers'),
         getDocument: id => call('getDocument', id),
+        listTranslations: id => call('listTranslations', id),
+        getTranslationDocument: id => call('getTranslationDocument', id),
         connectionStatus: () => call('connectionStatus'),
         importPdfs: () => call('importPdfs'),
         openDiagnostics: () => call('openDiagnostics'),

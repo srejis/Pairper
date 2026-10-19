@@ -18,6 +18,7 @@ export interface Cell {
   row: number; column: number; rowspan: number; colspan: number; header: boolean; runs: Run[];
 }
 export interface BlockContent {
+  translation_labels?: { source: string; target: string }[];
   runs: Run[]; items: Run[][]; cells: Cell[]; level: number; ordered: boolean;
   code_lines?: { indent: number; runs: Run[] }[];
   source_verified: boolean; image_url: string | null; latex: string | null;
@@ -30,6 +31,7 @@ export interface DocumentBlock {
   relations?: { kind: 'caption_of' | 'proof_of' | 'footnote_for' | 'refers_to'; target_id: string }[];
 }
 export interface DisplayDocument {
+  translation?: { status: 'draft' | 'published'; complete: boolean; missing_unit_count: number };
   display_schema_version: '1.0'; source_schema_version: '1.0' | '1.1';
   paper_id: string; view_id: string; blocks: DocumentBlock[];
   normalization_audit: unknown[];
@@ -41,6 +43,8 @@ export interface ConnectionStatus {
   changed_at?: string; retry_in_seconds?: number | null;
 }
 export interface PairperApi {
+  listTranslations?(paperId: string): Promise<{ session_id: string; status: 'draft' | 'published'; revision: number }[]>;
+  getTranslationDocument?(sessionId: string): Promise<DisplayDocument>;
   copyUpdateRequest(paperId: string): Promise<{copied: boolean}>;
   autostartStatus(): Promise<{ enabled: boolean }>;
   setAutostart(enabled: boolean): Promise<{ enabled: boolean }>;

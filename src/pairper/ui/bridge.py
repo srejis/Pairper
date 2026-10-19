@@ -1,15 +1,15 @@
 import json
 import re
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QDesktopServices, QGuiApplication
-from PySide6.QtWidgets import QFileDialog, QMessageBox
-
 from pairper.app.autostart import autostart_status, set_autostart
 from pairper.document.comparison import comparison_image
 from pairper.document.presentation import display_document
+from pairper.translation.service import TranslationService
 from pairper.tunnel.config import project_root
 from pairper.tunnel.runtime import public_status
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, QUrl, Signal, Slot
+from PySide6.QtGui import QDesktopServices, QGuiApplication
+from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 
 class TaskSignals(QObject):
@@ -58,6 +58,7 @@ class FrontendBridge(QObject):
         self.polling = False
         self.importing = False
         self.supervisor = None
+        self.translation_service = None
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.poll)
         self.timer.start(1500)
@@ -157,6 +158,27 @@ class FrontendBridge(QObject):
                 raise ValueError("Invalid paper ID")
             return display_document(self.library, paper_id)
 
+        self.dispatch(request_id, load)
+
+    def translations(self):
+        if self.translation_service is None:
+            self.translation_service = TranslationService(self.library)
+        return self.translation_service
+
+    @Slot(str, str)
+    def listTranslations(self, request_id, paper_id):
+        def load():
+            if not re.fullmatch(r'[a-f0-9]{32}', paper_id):
+                raise ValueError('Invalid paper ID')
+            return self.translations().sessions(paper_id)
+        self.dispatch(request_id, load)
+
+    @Slot(str, str)
+    def getTranslationDocument(self, request_id, session_id):
+        def load():
+            if not re.fullmatch(r'[a-f0-9]{64}', session_id):
+                raise ValueError('Invalid translation session')
+            return self.translations().display(session_id)
         self.dispatch(request_id, load)
 
     @Slot(str)

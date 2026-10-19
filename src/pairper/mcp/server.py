@@ -7,9 +7,9 @@ from typing import Any
 from mcp import types
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
-
 from pairper.document.models import Block, Document, Omission, Region
 from pairper.storage.library import Library
+from pairper.translation.mcp import register_translation_tools
 
 WORKFLOW = """Pairper 원본 기반 논문 재구성 절차:
 1. list_pending_papers로 대상을 찾는다. 명시적 교정은 begin_view_build(revise_existing=true)를
@@ -65,9 +65,10 @@ source_refs 생략은 편의 기능이며 실제 표시 원문 누락/중복 검
 """
 
 
-def create_server(library: Library | None = None):
+def create_server(library: Library | None = None, translation_directory=None):
     library = library or Library()
-    server = MCPServer("Pairper", instructions=WORKFLOW)
+    server = MCPServer("Pairper", instructions=WORKFLOW + "\n한국어 번역 요청은 get_translation_guide를 읽고 "
+                       "별도 translation 세션에서 수행한다. 원문 재구성 블록에 한국어 번역을 쓰지 않는다.")
 
     def tool():
         def decorate(function):
@@ -205,6 +206,7 @@ def create_server(library: Library | None = None):
         """Update pending Pairper papers without rewriting source content."""
         return WORKFLOW
 
+    register_translation_tools(server, library, tool, directory=translation_directory)
     return server
 
 
