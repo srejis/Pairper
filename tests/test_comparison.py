@@ -116,7 +116,7 @@ def test_ui_library_uses_actual_filename_and_latest_error(library, pdf_path):
     paper = library.register(pdf_path)
     job = library.begin(paper["id"], paper["sha256"])["job_id"]
     with library.connect() as con:
-        con.execute("UPDATE papers SET metadata='{}' WHERE id=?", (paper["id"],))
+        con.execute("UPDATE papers SET metadata='{}',title='' WHERE id=?", (paper["id"],))
         con.execute("UPDATE jobs SET error='Actual saved failure' WHERE id=?", (job,))
     result = FrontendBridge.paper_list(SimpleNamespace(library=library))[0]
     assert result["title"] == pdf_path.name

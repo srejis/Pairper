@@ -7,9 +7,11 @@ from typing import Any
 from mcp import types
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+
 from pairper.document.models import Block, Document, Omission, Region
 from pairper.storage.library import Library
 from pairper.translation.mcp import register_translation_tools
+from pairper.update import PaperUpdates
 
 WORKFLOW = """Pairper 원본 기반 논문 재구성 절차:
 1. list_pending_papers로 대상을 찾는다. 명시적 교정은 begin_view_build(revise_existing=true)를
@@ -42,6 +44,23 @@ finalize 성공과 실제 읽기 화면의 구조·표시 확인 후에만 완�
 구분한다. 수식·표·본문을 이미지로 우회하거나 불확실한 부분을 추측해서 완료하지 않는다.
 """
 
+UPDATE_WORKFLOW = """Pairper 논문 업데이트는 원문 재구성 + 한국어 해석 + 실제 논문 제목 반영이다.
+1. list_paper_updates로 논문별 needs를 확인한다. 특정 paper_id가 지정되면 그 논문만 처리한다.
+list_pending_papers는 원문 재구성만 조회하므로 전체 업데이트 대상 판정에 쓰지 않는다.
+2. reconstruction이 필요할 때만 아래 원본 재구성 절차로 생성·검증·확정한다.
+기존 유효한 뷰는 재생성하지 않는다. 원문이 준비되면 나머지 두 작업을 각각 이어서 수행한다.
+3. title이 필요하면 get_paper_title_candidates와 원본 제목 페이지 이미지를 읽는다.
+실제 원어 제목·부제를 확인한 title 블록을 읽기 순서로 골라 confirm_paper_title에 보낸다.
+메타데이터나 파일명만으로 제목을 확인했다고 선언하지 않는다. 제목이 불확실하면 보류하고 사유를 보고한다.
+원본 파일명·PDF·source·이전 view는 유지한다. 라이브러리 대표 제목만 갱신한다.
+4. korean이 필요하면 get_translation_guide를 읽고 기존 translation session을 재개하거나
+begin_translation으로 현재 원문에 대응하는 세션을 시작한다. 기존 완료 번역은 재사용한다.
+원문 보존·실제 대조·검토·확정 절차를 지킨다. 한국어 해석은 번역이며 설명·해설은 추가하지 않는다.
+5. 재구성/제목/번역은 부분 완료를 보존한다. 한 단계 실패로 다른 완료 결과를 버리지 않는다.
+마지막에 list_paper_updates(include_complete=true)로 각 단계의 실제 결과와 남은 작업을 확인한다.
+완료는 세 단계가 모두 충족됐을 때만 보고한다. 재요청은 미완료 작업만 이어서 처리한다.
+"""
+
 RECONSTRUCTION_GUIDE = """원본 위치와 읽기 단위는 다르다.
 프로그램 근거: pdf_evidence의 목차·태그 존재 여부는 원본 정보다. page_evidence의 lines와
 characters는 추출기의 기하 정보이고 의미 문단이 아니다. paths는 PDF 그리기 연산이다.
@@ -67,8 +86,8 @@ source_refs 생략은 편의 기능이며 실제 표시 원문 누락/중복 검
 
 def create_server(library: Library | None = None, translation_directory=None):
     library = library or Library()
-    server = MCPServer("Pairper", instructions=WORKFLOW + "\n한국어 번역 요청은 get_translation_guide를 읽고 "
-                       "별도 translation 세션에서 수행한다. 원문 재구성 블록에 한국어 번역을 쓰지 않는다.")
+    updates = PaperUpdates(library, translation_directory)
+    server = MCPServer("Pairper", instructions=UPDATE_WORKFLOW + "\n" + WORKFLOW)
 
     def tool():
         def decorate(function):
@@ -105,8 +124,24 @@ def create_server(library: Library | None = None, translation_directory=None):
 
     @tool()
     def list_pending_papers() -> list[dict[str, Any]]:
-        """Find papers without valid saved views. Start updates here; skip completed papers."""
+        """Find papers missing reconstruction only; use list_paper_updates for the complete workflow."""
         return library.list_papers(pending=True)
+
+    @tool()
+    def list_paper_updates(include_complete: bool = False, paper_id: str | None = None) -> list[dict[str, Any]]:
+        """Find missing reconstruction/title/Korean work, including existing reconstructed papers."""
+        return updates.list_updates(include_complete, paper_id)
+
+    @tool()
+    def get_paper_title_candidates(paper_id: str) -> dict[str, Any]:
+        """Read source title blocks and page references; inspect the actual title page image."""
+        return updates.title_candidates(paper_id)
+
+    @tool()
+    def confirm_paper_title(paper_id: str, source_sha256: str, view_id: str,
+                            block_ids: list[str], image_inspected: bool) -> dict[str, Any]:
+        """After visual source comparison, persist a title derived only from selected title blocks."""
+        return updates.confirm_title(paper_id, source_sha256, view_id, block_ids, image_inspected)
 
     @tool()
     def get_paper_manifest(paper_id: str) -> dict[str, Any]:
@@ -203,8 +238,8 @@ def create_server(library: Library | None = None, translation_directory=None):
 
     @server.prompt()
     def update_papers() -> str:
-        """Update pending Pairper papers without rewriting source content."""
-        return WORKFLOW
+        """Complete missing reconstruction, Korean translation and source-verified library titles."""
+        return UPDATE_WORKFLOW + "\n" + WORKFLOW
 
     register_translation_tools(server, library, tool, directory=translation_directory)
     return server

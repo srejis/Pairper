@@ -1,15 +1,16 @@
 import json
 import re
 
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, QUrl, Signal, Slot
+from PySide6.QtGui import QDesktopServices, QGuiApplication
+from PySide6.QtWidgets import QFileDialog, QMessageBox
+
 from pairper.app.autostart import autostart_status, set_autostart
 from pairper.document.comparison import comparison_image
 from pairper.document.presentation import display_document
 from pairper.translation.service import TranslationService
 from pairper.tunnel.config import project_root
 from pairper.tunnel.runtime import public_status
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, QTimer, QUrl, Signal, Slot
-from PySide6.QtGui import QDesktopServices, QGuiApplication
-from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 
 class TaskSignals(QObject):
@@ -111,8 +112,7 @@ class FrontendBridge(QObject):
         with self.library.connect() as con:
             for paper in papers:
                 original = self.library.paper(paper["id"])
-                metadata = json.loads(original["metadata"])
-                paper["title"] = metadata.get("title") or paper["filename"]
+                paper["title"] = original["title"].strip() or paper["filename"]
                 paper["original_available"] = self.library.managed(
                     original["original_path"]
                 ).is_file()
@@ -142,7 +142,7 @@ class FrontendBridge(QObject):
             if not re.fullmatch(r"[a-f0-9]{32}", paper_id):
                 raise ValueError("Invalid paper ID")
             paper = self.library.paper(paper_id)
-            title = json.loads(paper["metadata"]).get("title") or paper["filename"]
+            title = paper["title"].strip() or paper["filename"]
             QGuiApplication.clipboard().setText(
                 f"Pairper 논문 업데이트해 줘. 대상 논문: {title} (paper_id: {paper_id})"
             )
