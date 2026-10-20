@@ -1,25 +1,164 @@
-# Pairper MCP 및 Windows 터널 운영
+# AI/MCP 연결: 로컬 stdio와 ChatGPT 터널
+[README](../README.md) · [Windows 설치](install.md)
 
-## 프로젝트 설정
+## 연결 전에 확인하세요
 
-기존 `D:\project\18_pairper\.env`가 있으면 그대로 사용합니다. 실행기와 진단기는 파일 내용을 덮어쓰지 않고 현재 사용자만 읽고 쓸 수 있도록 DACL을 제한합니다. 파일이 없을 때만 `.env.example`을 참고해 직접 만드세요.
+Pairper의 재구성·한국어 생성에는 AI가 필요합니다. PDF 등록과 이미 저장한 문서 열람만으로 새 결과가 생성되지는 않습니다.
 
-필수 변수는 `CONTROL_PLANE_API_KEY`와 `CONTROL_PLANE_TUNNEL_ID`이며, 선택 변수는 `PAIRPER_DATA_DIR`입니다. 인증에는 실제 `sk-proj-` 비밀 키를 사용합니다. `key_` Tracking ID는 인증 키가 아닙니다. 비밀값을 채팅, 명령줄, 커밋에 넣지 않습니다.
+두 연결 방식 중 하나를 선택합니다.
 
-지원 `.env` 문법:
+| 방식 | 준비 |
+| --- | --- |
+| 같은 PC의 로컬 MCP 클라이언트 | stdio 지원, 이미지 도구 응답 수신, 저장 도구 실행 권한 |
+| ChatGPT에서 로컬 Pairper 사용 | 사용자 지정 MCP 추가/사용 권한 + Secure MCP Tunnel + 해당 워크스페이스 연결 |
 
-- UTF-8, 한 줄에 `KEY=value` 하나. 빈 줄과 `#`로 시작하는 주석 허용.
-- 변수 이름은 위 세 가지만 허용. 중복 키·빈 값·잘못된 형식은 행 번호로 진단.
-- 작은따옴표/큰따옴표로 감싼 한 줄 값 지원. 공백이 있는 경로는 따옴표 필요.
-- 인라인 주석, `export`, 여러 줄, escape, 보간은 지원하지 않음. `$()`도 실행하지 않고 리터럴로 취급하며, 키 형식 검사에서 거절됨.
-- `PAIRPER_DATA_DIR`은 절대 경로. 생략 시 기본 사용자 Local AppData 라이브러리 사용.
+한국어 자동 생성·독립 검토는 두 방식 모두 **Windows에서 실행 가능한 Codex CLI와 ChatGPT 로그인**이 추가로 필요합니다. [설치 확인](install.md)
 
-영구 사용자/시스템 환경변수는 변경하지 않습니다. `.env`는 Python 실행기가 읽고 자신의 터널 자식 환경에만 전달합니다. 다른 프로젝트의 OpenAI·MCP·터널 환경 설정은 자식 환경에서 제거합니다.
+### ChatGPT 플랜과 비용
+
+확인 기준: 2026-10-20. [OpenAI의 사용자 지정 MCP 공식 안내](https://developers.openai.com/api/docs/guides/custom-mcp-server)는 ChatGPT 웹에서의 연결과 워크스페이스 권한·보안 제한, 도구별 승인 설정을 안내합니다. 이 문서만으로 Free/Plus/Pro/Business/Enterprise/Edu 각각의 모든 계정에서 읽기·쓰기·터널 기능이 제공된다고 확정할 수 없습니다. **“유료 구독이면 모두 가능”이라고 가정하지 마세요.**
+
+먼저 자신의 계정에 사용자 지정 MCP 추가 화면이 있는지, 이미지와 쓰기 도구가 허용되는지 확인하세요. 조직 계정은 관리자 정책도 적용됩니다. 터널 권한은 ChatGPT 구독과 별개인 Platform 조직 권한입니다. 메뉴가 없다면 설치 성공만으로 해결되지 않으므로 현재 공식 안내와 관리자에게 접근 가능 여부를 확인하세요.
+
+직접 설치 시 **Pairper 이용료는 무료**입니다. MCP 프로토콜은 모델 이용권이 아니며, Pairper가 MCP 호출마다 별도 모델 API 사용료를 청구하지 않습니다. 현재 ChatGPT 대화와 Codex ChatGPT 로그인 경로는 계정의 구독/사용 한도를 사용합니다. 터널 런타임 키는 연결 인증에 사용하며 모델 추론용 키로 사용하지 않습니다. 터널·외부 인프라의 과금 여부는 제공자 조건을 별도로 확인해야 합니다. 향후 Pairper 운영 공용 서버 MCP는 유료 예정이나 아직 미출시·가격 미정입니다.
+
+## A. 로컬 stdio 직접 연결
+
+터널이나 .env의 터널 인증 정보 없이 사용할 수 있습니다. 클라이언트에 다음 항목을 입력합니다.
+
+- command: 이 저장소 .venv/Scripts/python.exe의 **절대 경로**
+- args: -m, pairper.mcp.server
+- cwd를 지원하는 클라이언트라면 저장소 루트의 절대 경로
+- env: GUI와 동일한 PAIRPER_DATA_DIR. 기본 위치를 함께 쓰면 생략 가능
+
+다음은 설정 형식 예시입니다. YOUR_INSTALL_DIR과 YOUR_LIBRARY_DIR은 **직접 교체하는 자리표시자**이며 실재 경로가 아닙니다. 클라이언트마다 설정 파일과 필드가 다르므로 해당 클라이언트의 MCP 안내를 따르세요.
+
+```json
+{
+  "mcpServers": {
+    "pairper": {
+      "command": "YOUR_INSTALL_DIR/Pairper/.venv/Scripts/python.exe",
+      "args": ["-m", "pairper.mcp.server"],
+      "env": {
+        "PAIRPER_DATA_DIR": "YOUR_LIBRARY_DIR"
+      }
+    }
+  }
+}
+```
+
+기본 라이브러리를 쓰려면 env 항목 전체를 생략합니다. 이 서버는 stdio 프로토콜을 사용하므로 브라우저 URL로 등록할 수 없습니다. PowerShell에서 아래 명령이 입력을 기다리며 조용히 있는 것은 정상일 수 있지만 **도구 호출 성공 검증은 아닙니다**.
+
+```powershell
+.\.venv\Scripts\python.exe -m pairper.mcp.server
+```
+
+수동 실행은 Ctrl+C로 종료하고 MCP 클라이언트가 서버를 시작하도록 하세요. stdout은 MCP 통신 전용입니다. GUI가 읽는 .env의 데이터 경로는 이 직접 실행에 자동 적용되지 않으므로 env를 맞춰야 합니다.
+
+## B. ChatGPT에서 연결: Secure MCP Tunnel
+
+현재 Pairper 서버는 stdio이며 자체 공개 HTTP 주소를 제공하지 않습니다. localhost 주소를 ChatGPT에 붙이는 대신 공식 Secure MCP Tunnel을 통해 연결합니다. [OpenAI 공식 터널 안내](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
+
+### 1. 터널과 권한 준비
+
+[Platform 터널 설정](https://platform.openai.com/settings/organization/tunnels)에서 사용할 터널을 만들거나 기존 것을 재사용하세요. 생성/수정에는 **Tunnels Read + Manage**, 실행·선택에는 **Read + Use**가 필요합니다. 대상 ChatGPT 워크스페이스와 Platform 조직의 연결을 확인하세요. 보이지 않는다면 조직 소유자/RBAC 관리자에게 권한을 요청합니다.
+
+터널 이름은 자유롭게 정합니다. 개발자의 기존 터널이나 키를 공유받을 필요는 없습니다.
+
+### 2. 공식 tunnel-client 설치
+
+[공식 최신 배포](https://github.com/openai/tunnel-client/releases/latest) 또는 Platform의 다운로드 링크에서 Windows와 CPU에 맞는 실행 파일을 받아 압축을 풉니다. Pairper의 과거 검증은 v0.0.16 기준이었으며 최신 바이너리의 호환을 자동 보장하지 않습니다. 다음 도움말로 시작하세요.
+
+```powershell
+$tunnelClientPath = Read-Host '압축을 푼 tunnel-client.exe의 절대 경로'
+& $tunnelClientPath help quickstart
+```
+
+Pairper 실행기는 프로필을 만들므로 별도의 init/run 프로필을 중복 실행할 필요는 없습니다.
+
+### 3. 이 저장소의 .env 설정
+
+저장소 루트에서 실행합니다. 기존 파일이 있으면 덮어쓰지 않습니다.
+
+```powershell
+if (-not (Test-Path -LiteralPath '.env')) {
+    Copy-Item -LiteralPath '.env.example' -Destination '.env'
+}
+notepad .env
+```
+
+메모장에서 아래 두 변수의 빈 값만 자신의 정보로 채워 저장하세요.
+
+- CONTROL_PLANE_API_KEY: 터널 런타임용 실제 프로젝트 비밀 키. 현재 코드가 요구하는 형식은 sk-proj- 접두사입니다. key_ Tracking ID는 사용할 수 없습니다.
+- CONTROL_PLANE_TUNNEL_ID: 자신이 만든 터널 ID.
+- 선택 사항 PAIRPER_DATA_DIR: 사용자 지정 라이브러리의 절대 경로. 앱과 MCP가 같은 값을 사용해야 합니다.
+
+**비밀값은 채팅·명령 인자·스크린샷·커밋에 넣지 마세요.** .env와 .pairper 폴더는 공개하지 않습니다. 터널 키가 있다는 사실만으로 모델 API를 호출하는 것은 아닙니다.
+
+지원 문법은 UTF-8의 한 줄 KEY=value, 빈 줄, 줄 전체 주석, 한 줄 작은/큰따옴표입니다. 허용 변수는 위 세 개뿐입니다. 빈 값·중복 변수·인라인 주석·export·여러 줄·변수 치환은 지원하지 않습니다. 사용하지 않는 선택 변수는 주석 상태로 둡니다.
+
+### 4. 실행 파일 등록 → 앱 시작 → 로컬 진단
+
+같은 PowerShell에서:
+
+```powershell
+.\test-pairper-tunnel.ps1 -ClientPath $tunnelClientPath
+.\start-pairper.ps1
+```
+
+진단기는 설정과 실행 경로를 검사하고 .pairper/settings.json에 실행 파일 위치를 저장합니다. 앱이 터널을 시작합니다. **첫 진단 통과는 원격 인증 성공이 아닙니다.**
+
+앱을 켜 둔 채 다른 PowerShell에서 저장소 폴더로 이동해 상태를 확인합니다.
+
+```powershell
+.\test-pairper-tunnel.ps1 -StatusOnly
+```
+
+설정의 **연결 진단** 또는 상태 결과의 admin_url로 로컬 관리 화면을 열어 healthy/ready/connected를 구분해 확인합니다. 관리 화면은 로컬 전용입니다. Pairper 앱은 연결을 유지하고 실패 시 재연결합니다.
+
+### 5. ChatGPT 등록
+
+[ChatGPT Plugins](https://chatgpt.com/plugins)에서 추가 버튼 → **Add custom MCP server** → Connection의 **Tunnel**을 선택합니다. 자신의 터널을 고르고 인증 설정·위험 안내를 검토한 뒤 생성하여 설치합니다. 이 Pairper 서버 자체에는 OAuth 구현이 없으며 터널 연결의 권한으로 접근합니다. 사용할 수 있는 인증 선택지는 실제 화면과 조직 정책을 따르세요.
+
+대화창에서 @로 설치한 Pairper를 선택합니다. 예전 UI의 “Apps/Connectors/Developer mode” 표기가 남아 있다면 최신 공식 연결 안내와 실제 계정 화면을 기준으로 하세요. 터널이 목록에 없으면 워크스페이스 연결과 Read + Use를 확인합니다.
+
+## 연결 완료를 판단하는 순서
+
+전송 가능한 테스트 PDF 한 편으로 확인하세요.
+
+1. **도구 발견:** list_papers, list_paper_updates, get_page_image, begin_view_build, finalize_view_build 및 번역 workflow 도구가 보이는지 확인합니다. 도구 수는 버전에 따라 달라지므로 고정 숫자를 성공 조건으로 삼지 않습니다.
+2. **읽기:** “Pairper의 list_papers를 호출해 목록을 보여 줘.” 결과가 앱과 같은지 비교합니다.
+3. **이미지:** 해당 논문 ID와 1페이지로 get_page_image를 호출하고 실제 PNG가 AI에 전달되는지 확인합니다. 경로 문자열만 반환되면 완료하지 않습니다.
+4. **쓰기:** 테스트 논문의 원문 재구성을 요청하고 begin → append → validate → finalize 결과와 앱 표시를 확인합니다. 쓰기 승인이 필요하면 전송 내용을 읽고 승인하세요. 저장 권한이 없으면 목록 조회만 성공한 것입니다.
+5. **한국어:** start_translation_workflow → run_translation_workflow → get_translation_workflow_report → ready 후 finalize_translation_workflow 흐름과 앱의 한국어 전환을 확인합니다. 실제 Codex 호출과 사용 한도가 필요합니다.
+6. **결과:** list_paper_updates(include_complete=true)로 원문·제목·한국어의 완료/남은 작업을 확인합니다.
+
+**로컬 stdio 성공 ≠ 터널 readiness ≠ ChatGPT 실제 도구 호출 성공 ≠ 논문 내용 품질 검증.** 앱의 마지막 도구 호출 기록만으로 호출자가 ChatGPT라고 단정하지 않습니다.
+
+## 문제 해결
+
+| 증상 | 확인할 것 |
+| --- | --- |
+| MCP 메뉴/쓰기 기능 없음 | 계정의 기능 제공 여부, 도구 승인 설정, 워크스페이스 정책 |
+| 터널 목록에 없음 | 대상 워크스페이스 연결, Platform 조직, Tunnels Read + Use |
+| 실행 파일 없음 | 다운로드·압축 해제 후 -ClientPath로 실제 위치 등록 |
+| 401/403 | 런타임 키와 조직 권한 확인. 비밀값을 공유하지 않기 |
+| 도구는 보이지만 목록이 다름 | 앱과 서버의 PAIRPER_DATA_DIR 일치 |
+| 이미지 실패 | 클라이언트 이미지 응답 지원과 원본 PDF 접근 상태 |
+| 새 번역 도구가 안 보임 | 앱/MCP 재시작 후 ChatGPT 앱의 도구 정보 새로 고침 |
+| 한국어 생성 실패 | Codex CLI 로그인·필수 격리 옵션·사용 한도, workflow 보고서 |
+| 준비 상태지만 호출 실패 | 실제 ChatGPT 대화에서 다시 호출하여 단계별 오류 확인 |
+
+논문 원본과 이미지가 연결한 AI에 전달됩니다. 로컬 보관과 외부 AI 처리는 구분하세요. 로그를 제보할 때 키·식별자·개인 경로·논문 비공개 정보를 가립니다.
+
+
+## 고급 운영
+
+아래 명령은 저장소 루트에서 실행합니다. 기본 연결이 완료된 뒤 필요할 때만 사용하세요.
 
 ## 기본 실행: 단일 트레이 앱
 
 ```powershell
-cd D:\project\18_pairper
 .\start-pairper.ps1
 # 창을 강제로 띄우지 않고 트레이에서 시작
 .\start-pairper.ps1 -Tray
@@ -28,7 +167,7 @@ cd D:\project\18_pairper
 기본 실행 파일 위치가 달라졌으면 한 번 명시해 저장합니다.
 
 ```powershell
-.\test-pairper-tunnel.ps1 -ClientPath 'D:\tools\another-folder\tunnel-client.exe'
+.\test-pairper-tunnel.ps1 -ClientPath $tunnelClientPath
 ```
 
 경로는 `.pairper/settings.json`에서 관리합니다. 실행기/진단기가 같은 설정을 재사용합니다. `.pairper/tunnel-client.yaml`은 공식 `sample_mcp_stdio_local`과 같은 설정이며 JSON 문법의 YAML 1.2입니다. 키 대신 `env:CONTROL_PLANE_API_KEY` 참조를 기록합니다. `main` 채널 명령은 프로젝트 `.venv/Scripts/python.exe -m pairper.mcp.server`로 고정하며 임의 명령으로 수정된 프로필은 실행하지 않습니다. 정상 파일을 반복 실행할 때 다시 쓰지 않습니다.
@@ -69,28 +208,10 @@ cd D:\project\18_pairper
 
 설치 후 로그아웃/재로그인하여 트레이 자동 실행 → readiness → ChatGPT 도구 호출 → 중복 프로세스 없음 → 기존 데이터 유지를 확인해야 합니다. 이 검증 때문에 사용자 세션을 자동으로 종료하지 않습니다. 등록 해제는 현재 앱을 종료하거나 다른 작업을 변경하지 않습니다.
 
-## ChatGPT 연결과 검증 단계
 
-[OpenAI 공식 Secure MCP Tunnel 문서](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels) 및 설치된 v0.0.16의 도움말을 확인했습니다. 사용자가 준비한 기존 터널·프로젝트·런타임 키를 재사용합니다. 조직의 터널 관리/사용 권한과 대상 ChatGPT 워크스페이스 연결이 필요합니다.
+## MCP 문서 계약
 
-ChatGPT의 사용자 지정 MCP 등록 화면에서 기존 `pairper-local` 터널을 선택하는 작업은 사용자가 진행합니다. 터널 실행기를 켜 둔 상태에서 다음을 확인하세요.
-
-1. 도구 목록에서 Pairper 13개 도구 발견.
-2. `list_papers` 결과와 실제 앱 라이브러리 비교.
-3. `get_page_image`의 PNG가 모델에 전달되는지 확인.
-4. 테스트 논문의 블록 저장·검증·확정 후 로컬 DB와 앱에서 결과 확인.
-
-**로컬 stdio 테스트, 실제 터널 인증/readiness, ChatGPT 실제 도구 호출은 서로 다른 검증 단계입니다.** UI는 실제 health 확인 후에만 “로컬 터널 런타임 준비 완료”를 표시합니다. 마지막 정상 통신/진단 시각과 터널 경유 성공 도구의 이름·시각을 볼 수 있지만, 호출자가 ChatGPT였다는 사실은 별도 확인해야 합니다.
-
-## 로컬 stdio 직접 연결
-
-터널 없이 로컬 MCP 클라이언트가 사용할 수도 있습니다. GUI와 독립적인 기존 인터페이스를 유지했습니다.
-
-```powershell
-.\.venv\Scripts\python.exe -m pairper.mcp.server
-```
-
-stdout은 MCP 전용입니다. 도구는 `list_papers`, `list_pending_papers`, `get_paper_manifest`, `get_page_content`, `get_page_evidence`, `get_reconstruction_guide`, `get_page_image`, `get_region_image`, `begin_view_build`, `append_document_blocks`, `validate_view_build`, `finalize_view_build`, `get_build_report`입니다. 서버의 `update_papers` 프롬프트와 `pairper://document-schema` 리소스에 문서 계약이 있습니다.
+현재 도구 목록은 클라이언트의 list_tools 응답을 기준으로 확인합니다. 서버의 update_papers 프롬프트와 pairper://document-schema 리소스, 번역 가이드와 workflow 보고서를 읽어 주세요.
 
 페이지 번호는 1부터, 좌표는 회전 제거한 PDF point 기준 좌상단 원점입니다. 텍스트는 span refs로 연결하며 수식/표/그림에는 원본 영역을 지정합니다. `source_verified`와 `visual_review_pages`는 검토자의 진술이므로 자동 의미 보존 증명으로 간주하지 않습니다. 작업은 같은 ID로 재개·수정하고 검증 통과 후에만 확정합니다. 원본 PDF 삭제·임의 파일 읽기 도구는 없습니다.
 

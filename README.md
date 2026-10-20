@@ -1,103 +1,92 @@
 # Pairper
+### 논문을 대신 요약하기보다, 함께 읽고 이해하도록.
 
-AI가 원본 PDF의 구조를 판단하고, 원문 ID와 원본 영역을 연결한 **페이지 구분 없는 1열 논문 뷰**를 저장하는 로컬 데스크톱 앱입니다. UI는 React + TypeScript, 데스크톱 셸과 데이터 처리는 Python입니다. 별도 원문 대응 저장소의 한국어 번역과 원문/한국어 전환을 지원합니다. 설명·해설·질의응답은 포함하지 않습니다.
+Pairper는 **AI와 같은 논문을 참조하며 읽는 로컬 논문 리더**입니다. PDF 원문을 출처와 연결된 연속 1열 문서로 재구성하고, 영어 문법·어순의 부담을 덜어 주는 한국어 읽기를 제공합니다. 한국인 대학원생이 논문에서 막힌 이유를 구분하고, 스스로 의미를 깨닫도록 돕고자 만들고 있습니다.
 
-## 실행
+[Windows 설치](docs/install.md) · [AI/MCP 연결](docs/mcp.md) · [현재 기능과 검증 범위](docs/documentation-validation.md) · [문제 제보](https://github.com/srejis/Pairper/issues)
 
-Python 3.11 이상과 [uv](https://docs.astral.sh/uv/)가 필요합니다. 현재 개발 환경에는 uv와 Python 3.12를 설치하고 의존성을 구성했습니다.
+> 현재 소스 설치형 개발 버전입니다(패키지 버전 0.1.0). 핵심 처리에는 AI 연결이 필요합니다. ChatGPT 연결 권한과 한국어 자동 생성을 위한 Codex CLI 준비 사항을 먼저 확인해 주세요.
+
+## 왜 만들었나요?
+
+논문을 읽다가 막히면 무엇이 어려운지조차 구분하기 힘들었습니다. 영어가 해석되지 않는 걸까, 전문용어를 모르는 걸까, 수식의 계산 방법을 모르는 걸까. 아니면 각각을 알면서도 논문이 말하려는 의미를 이해하지 못한 걸까.
+
+그래서 읽는 과정의 장벽을 하나씩 덜어 보고 싶었습니다. 원문은 읽기 편하게 재구성하고, 영어 문장은 한국어로 읽히게 하며, 전문용어와 수식은 필요한 자리에서 해설하는 것. 그렇게 남은 질문을 AI와 이어가면서 **논문의 의미를 깨닫는 일은 독자 자신의 경험으로 남기는 것**이 Pairper의 목적입니다.
+
+## AI를 어떻게 사용하나요?
+
+- **재구성:** AI가 PDF의 읽기 순서와 문단·수식·표·그림의 구조를 판단합니다. 프로그램은 원문 ID와 출처를 보존하고 검사·저장·표시합니다. 요약으로 본문을 대체하지 않는 것이 원칙입니다.
+- **한국어 해석:** 영어 문법·어순·일반 표현의 장벽을 덜되, 전문용어와 논리 관계를 무리하게 일상어로 바꾸지 않는 방향입니다. 원문과 한국어를 전환해 읽습니다.
+- **함께 참조하기:** MCP(Model Context Protocol)는 AI가 Pairper의 논문 자료를 조회하고 결과를 저장하는 연결 방식입니다. 사람은 리더에서 읽고 AI는 같은 논문의 원문·구조·출처 자료를 도구로 참조합니다. 화면 픽셀이나 현재 커서가 자동 공유되는 기능은 아닙니다.
+- **해설과 꼬리 질문:** 전문용어·수식의 의미와 계산을 해설하고, 그 다음 질문을 이어가는 것이 제품 방향입니다. **현재 이 저장소에는 클릭형 해설 패널이나 앱 내부 채팅이 없습니다.** 질문은 연결한 AI의 대화창에서 논문과 페이지·절을 지정해 이어갑니다. 현재 위치 자동 전달은 지원하지 않습니다.
+
+이것은 Pairper의 설계 선택입니다. 다른 논문 AI 도구보다 학습 효과가 높다거나, 다른 도구는 요약만 제공한다는 주장은 아직 검증하지 않았습니다.
+
+## 지금 사용할 수 있는 것
+
+| 기능 | 현재 GitHub 코드 기준 |
+| --- | --- |
+| PDF 라이브러리 | 여러 PDF 추가, 중복 방지, 검색·정렬·상태 필터 |
+| 원문 재구성 | AI가 생성한 연속 1열 문서, 목차, 수식·표·그림, 원본 영역 대조 |
+| 한국어 읽기 | 원문에 연결된 별도 번역 저장, 원문/한국어 전환 |
+| 논문 업데이트 | 미완료 재구성·제목 확인·한국어 작업 조회, 부분 완료 보존 |
+| 한국어 자동 생성·검토 | 설치된 Codex CLI와 ChatGPT 로그인으로 실행. 호환 CLI와 사용 한도 필요 |
+| Windows 운영 | 트레이 상주, 터널 상태·재연결, 선택적 로그인 자동 실행 |
+| 클릭형 용어·수식 해설 | 이 저장소에는 미포함 |
+| Pairper 운영 공용 MCP | 미출시, 가격 미정 |
+
+원문 보존과 번역 충실도는 목표이며 무오류 보장이 아닙니다. 특히 수식·표와 모호한 추출 결과는 원본 대조가 필요합니다.
+
+### 화면과 데모
+
+저장소에 있는 [리더 화면](docs/screenshots/ui-redesign/reader-1280.png)과 [원본 대조 화면](docs/screenshots/ui-redesign/source-1280.png)은 **2026-10-16 실제 앱에서 촬영한 UI 검증용 합성 문서**입니다. 실제 논문의 해석·해설 품질을 보여 주는 데모는 아닙니다.
+
+**실제 논문 데모 이미지 자리 — 촬영 예정:** 공개 가능한 논문 하나로 PDF 추가 → AI 업데이트 → 원문/한국어 전환 → 원본 대조 → AI 후속 질문을 촬영합니다. 아직 제공되지 않은 기능의 화면을 만들거나 합성하지 않습니다. [촬영 지침](docs/demo.md)
+
+## 어떻게 읽나요?
+
+1. [설치](docs/install.md) 후 앱의 **PDF 추가**에서 논문을 등록합니다. 이때는 복사·추출만 하며 AI를 호출하지 않습니다.
+2. [로컬 MCP 또는 ChatGPT 터널](docs/mcp.md)을 연결합니다.
+3. 연결한 AI에 **“Pairper 논문 업데이트해 줘. 미완료 작업을 확인하고, 원본과 대조한 뒤 결과와 남은 작업을 알려 줘.”**라고 요청합니다.
+4. 라이브러리의 **읽기 가능** 논문을 열어 읽고 원문/한국어를 전환합니다. 한국어가 준비되지 않았다면 번역 상태와 Codex CLI 오류를 확인합니다.
+5. 이해되지 않는 곳은 AI 대화창에서 묻습니다. 예: **“Pairper에 등록한 이 논문의 3쪽 2절 수식을 원본 이미지와 대조해서, 기호가 가리키는 대상과 계산 순서를 설명해 줘.”** 논문 ID·제목을 함께 지정하고, 답변에서 생긴 의문을 이어 물어보세요.
+
+앱에 PDF를 추가하는 것만으로 재구성·한국어 생성이 자동 완료되지는 않습니다.
+
+## 이용료와 AI 연결 조건
+
+| 항목 | 안내 |
+| --- | --- |
+| 직접 설치 + 로컬 MCP | **Pairper 이용료 무료**. 사용자가 설치·연결·운영 |
+| 향후 Pairper 공용 서버 MCP | **서버 이용자 대상 유료 예정**. 아직 미출시이며 가격·제공 범위 미정 |
+| ChatGPT 구독·사용 한도 | Pairper와 별도. 필요한 기능·권한이 있는 계정/워크스페이스를 사용 |
+| 한국어 자동 생성 | Codex CLI의 ChatGPT 로그인과 해당 계정의 이용 조건·사용 한도 적용 |
+| 터널·외부 인프라 | 해당 서비스의 접근 권한과 비용 조건 별도 확인 |
+
+**MCP 연결 자체 때문에 Pairper가 모델 API 사용료를 추가 청구하지는 않습니다.** 현재 안내하는 ChatGPT 대화 및 Codex ChatGPT 로그인 경로는 Pairper가 별도 모델 API 키로 추론을 과금하는 방식이 아닙니다. 다만 “전체 사용 비용이 0원” 또는 “어떤 유료 ChatGPT 플랜이든 모든 쓰기 도구를 지원한다”는 뜻은 아닙니다. 터널 인증 키는 모델 호출용 키와 용도가 다릅니다.
+
+플랜 이름만으로 호환을 보장하지 않습니다. 설치 전에 **사용자 지정 MCP 추가, 이미지 응답 수신, 로컬 결과를 저장하는 쓰기 도구 실행 권한**, 한국어 생성용 Codex 이용 가능 여부를 확인하세요. [공식 문서와 연결 체크리스트](docs/mcp.md)
+
+## 시작하기
+
+Windows PowerShell에서 Git과 uv를 준비한 뒤, 설치할 상위 폴더에서 실행합니다.
 
 ```powershell
-cd D:\project\18_pairper
+git clone https://github.com/srejis/Pairper.git
+cd Pairper
+uv python install 3.12
 uv sync --locked
 uv run pairper
 ```
 
-프론트엔드 빌드 결과가 저장소에 포함되어 있어 Node.js나 Vite 서버 없이 실행할 수 있습니다. 현재 PC에서 PATH를 갱신하지 않고 실행하려면:
+프론트엔드 빌드가 포함되어 있어 일반 실행에 Node.js는 필요하지 않습니다. 첫 실행에서 터널 설정이 없으면 연결을 준비해야 합니다. **앱 실행 성공과 AI 연결 성공은 별도**입니다. [Windows 전체 설치 순서](docs/install.md)를 따라 로컬 MCP 또는 ChatGPT 연결을 마쳐 주세요.
 
-```powershell
-.\.venv\Scripts\pairper.exe
-```
+## 데이터와 피드백
 
-`start-pairper.ps1`로도 실행할 수 있습니다. GPU/원격 데스크톱 환경에서 화면이 비면 `-SoftwareRendering` 옵션을 사용하세요.
+PDF·재구성·번역은 로컬에 저장합니다. AI가 조회하거나 한국어를 생성할 때는 해당 원문·이미지 등 처리 자료가 연결한 AI 서비스에 전달됩니다. “로컬 저장”이 “외부 전송 없음”을 뜻하지 않습니다. 전송 권한이 있는 논문으로 시작해 주세요.
 
-```powershell
-.\start-pairper.ps1 -SoftwareRendering
-```
+[Issues](https://github.com/srejis/Pairper/issues)에 설치 단계, 오류, 기대한 동작, 실제 동작을 알려 주세요. 비밀 키·터널 식별자·개인 경로·비공개 논문은 제외합니다. 읽다가 어떤 이유로 막혔고 Pairper가 도움이 되었는지도 환영합니다.
 
-Pairper 앱이 터널을 자동 연결하고 관리합니다. 기존 `.env`는 수정하지 않고 재사용하며, 터널 콘솔을 따로 켤 필요가 없습니다. X 버튼은 트레이로 숨기고, 완전히 종료하려면 트레이의 **Pairper 종료**를 선택합니다. 앱을 다시 실행하면 기존 창이 복원됩니다.
+현재 저장소에는 프로젝트 전체에 적용되는 LICENSE 파일이 없습니다. 직접 설치 시 Pairper 이용료가 없다는 안내는 재배포·상업 이용 권한을 부여하는 오픈소스 라이선스와 별개입니다. [제3자 구성 요소](docs/third-party.md) · [폰트 라이선스](docs/fonts.md)
 
-```powershell
-.\start-pairper.ps1 -Tray    # 창을 띄우지 않고 트레이에서 시작
-# 필요할 때 상태 확인
-.\test-pairper-tunnel.ps1 -StatusOnly
-# 사용자가 한 번 실행하면 로그인 시 Pairper 앱 자동 시작 등록
-.\install-pairper-autostart.ps1
-# 기존 터널 전용 작업이 있다면 전환을 명시적으로 승인
-.\install-pairper-autostart.ps1 -MigrateLegacyTunnelTask
-# 등록 해제
-.\uninstall-pairper-autostart.ps1
-```
-
-자격정보 형식, 실행 파일 경로, 상태의 의미는 [터널 운영 안내](docs/mcp.md)를 확인하세요. 앱 상단 **설정 → 로그인 시 자동 실행**에서도 켜거나 끌 수 있습니다. Windows 예약 작업의 실제 상태를 표시하며, 끄면 자동 시작 작업만 해제하고 실행 중인 앱과 MCP 연결은 유지합니다. 앱 실행만으로 자동 시작을 등록하지 않습니다.
-
-저장소 기본 위치는 `platformdirs.user_data_path("Pairper", appauthor=False) / "library"`이며 Windows에서는 사용자 Local AppData 아래입니다. GUI와 MCP에 **같은 절대 경로**를 지정해야 합니다.
-
-```powershell
-$env:PAIRPER_DATA_DIR = 'D:\my-pairper-library'
-uv run pairper
-# GUI 없이 등록하는 선택적 CLI
-uv run pairper --import-pdf 'C:\papers\paper.pdf'
-```
-
-## 사용 순서
-
-1. 앱의 **PDF 추가**에서 하나 또는 여러 PDF를 선택합니다. 등록은 원본 복사·추출만 수행하며 AI를 호출하지 않습니다.
-2. [MCP 연결 안내](docs/mcp.md)에 따라 로컬 클라이언트 또는 지원되는 ChatGPT 환경에 연결합니다.
-3. 연결된 GPT에 **“Pairper 논문 업데이트해 줘”**라고 요청합니다.
-4. GPT가 `list_paper_updates`로 미완료 작업을 확인합니다. 필요한 원문 재구성을 저장·검증·확정하고, 실제 제목 페이지와 대조한 논문 제목을 라이브러리에 반영하며, 현재 원문에 연결된 한국어 번역을 검토·확정합니다. 기존 완료 결과는 재사용합니다.
-5. 라이브러리에서 **읽기 가능** 논문을 선택하면 독립된 리더로 이동합니다. 미처리 논문은 행을 펼쳐 상태를 확인하고 요청 문구를 복사합니다. 외부 프로세스의 변경은 1.5초 간격으로 감지합니다. 원문 재구성·한국어 번역·제목 확인이 모두 완료된 논문은 다음 업데이트 대상에서 제외됩니다. `list_pending_papers`는 원문 재구성만 필요한 논문을 조회합니다.
-
-라이브러리에서 제목·파일명 검색, 정렬, 상태 필터를 함께 사용합니다. 리더에서는 목차와 원본 대조를 오른쪽 오버레이로 열며, 문서 폭과 읽던 위치를 유지합니다. 문서 블록에 마우스를 올리거나 키보드로 초점을 이동하면 **원본 확인**이 나타납니다. 글자 설정은 15–21px 범위로 조절하며 기본값은 17px입니다. 자동 실행·MCP 상태·재연결·연결 진단은 라이브러리 상단 **설정**에서 관리합니다.
-
-## 구현 구조
-
-| 모듈 | 역할 |
-| --- | --- |
-| `app/controller.py`, `instance.py` | 트레이, 단일 실행 잠금/IPC, 앱 및 연결 종료 순서 |
-| `ui/` | Qt 셸, 제한된 비동기 WebChannel, 네이티브 파일 선택 |
-| `frontend/src/` | React + TypeScript 앱 셸, 라이브러리, 12종 문서 블록 |
-| `tunnel/supervisor.py`, `session.py` | 10초 상태 확인, 자동 재연결, 소유한 프로세스 트리 관리 |
-| `tunnel/config.py`, `runtime.py` | 프로젝트 .env, 프로필, 진단 CLI·안전한 상태·로그 마스킹 |
-| `pdf/source.py` | 영구 보관하는 span ID·문자열·좌표·서식·방향, 이미지/벡터 위치, 영역 렌더링 |
-| `storage/library.py` | SHA-256 중복 방지, SQLite WAL/트랜잭션, 재개 가능한 작업, 원자적 뷰 확정 |
-| `document/models.py` | Pydantic 문서 계약: 12종 블록, 인라인 수식, 병합 셀, 생략 근거 |
-| `document/renderer.py` | 원문 ID 기반 HTML, 정규화 변경 이력, 원본 대조 |
-| `document/presentation.py`, `text.py` | 버전이 있는 표시 데이터와 공통 원문 연결 정책 |
-| `document/comparison.py` | 저장된 블록·영역 ID 기반 원본 PDF 대조, 좌표·해시·이미지 크기 검증 |
-| `validation/checks.py` | 원문 누락/중복, 잘못된 참조, 해시, 시각 영역, 표 겹침 검사 |
-| `mcp/server.py` | GUI 독립 stdio MCP, 13개 도구, JSON Schema 리소스, 업데이트 프롬프트 |
-| `web/` | 로컬 CSS/JS, KaTeX 0.19.0 및 글꼴 |
-
-Python 모듈은 `src/pairper/`, 프론트엔드 소스는 `frontend/` 아래에 있습니다. 데이터는 `originals/`, `sources/`, `views/`, `assets/`, `evidence/`, `staging/`, `library.db`로 구분합니다. DB가 작업의 기준 데이터이며 staging JSON은 복구용 스냅샷입니다. 각 뷰의 `.normalization.json` 및 표시 데이터의 `normalization_audit`에는 줄 결합 전 원문과 결과를 보존합니다.
-
-## 검증
-
-```powershell
-uv run pytest -q
-uv run ruff check src tests tools
-uv run python tools/verify_ui.py
-cd frontend
-npm ci
-npm test
-npm run build
-```
-
-UI 통합 검증은 Windows에서 합성 단위 테스트용 PDF로 12종 블록, 수식 성공/실패, 병합 셀, 원본 자산, 실행 중 DB 변경 감지를 확인하고 `tmp/ui-verification/`에 결과와 캡처를 씁니다. 지정된 arXiv 논문의 대체 통합 검증으로 간주하지 않습니다.
-
-이번 UI 개편의 파일 구조, 원본 대조 검증 범위와 실제 화면 캡처는 [UI 개편 보고](docs/ui-redesign-report.md)에 정리했습니다. UI 글꼴은 Inter·Pretendard를 로컬 번들링하며 [출처와 라이선스](docs/fonts.md)를 함께 배포합니다.
-
-최신 검증 범위는 [트레이·자동 재연결 보고](docs/tray-supervisor-report.md)에 정리했습니다. 실제 트레이 숨김 중 원격 MCP 목록 조회, 터널 강제 종료 후 자동 복구, 복구 후 원격 목록/페이지 PNG 응답까지 확인했습니다. Windows 자동 시작 작업의 등록·해제와 상태 조회를 확인했으며 실제 재로그인은 수행하지 않았습니다. 이 검증이 실제 논문 재구성의 품질 검증을 뜻하지는 않습니다.
-
-## 프론트엔드 개발
-
-`frontend/`에서 `npm ci` 후 `npm run dev`를 실행하고, 다른 콘솔에서 `uv run pairper --dev-ui http://127.0.0.1:5173/`로 엽니다. 개발 서버는 명시한 루프백 origin에만 허용됩니다. 브라우저만으로는 Qt 브리지가 없어 라이브러리에 접근할 수 없습니다. 배포용 변경은 `npm run build`로 `src/pairper/web/frontend/`에 반영합니다. Python UI 비교는 `uv run pairper --legacy-ui`로 실행합니다.
+개발자는 [구조·개발·검증 안내](docs/development.md), [MCP 상세 계약](docs/mcp.md), [한국어 번역 실행 시스템](docs/translation-workflow.md)을 참고하세요.
