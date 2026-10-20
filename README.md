@@ -87,6 +87,6 @@ PDF·재구성·번역은 로컬에 저장합니다. AI가 조회하거나 한�
 
 [Issues](https://github.com/srejis/Pairper/issues)에 설치 단계, 오류, 기대한 동작, 실제 동작을 알려 주세요. 비밀 키·터널 식별자·개인 경로·비공개 논문은 제외합니다. 읽다가 어떤 이유로 막혔고 Pairper가 도움이 되었는지도 환영합니다.
 
-현재 저장소에는 프로젝트 전체에 적용되는 LICENSE 파일이 없습니다. 직접 설치 시 Pairper 이용료가 없다는 안내는 재배포·상업 이용 권한을 부여하는 오픈소스 라이선스와 별개입니다. [제3자 구성 요소](docs/third-party.md) · [폰트 라이선스](docs/fonts.md)
+Pairper 소스 코드는 [MIT 라이선스](LICENSE)로 공개합니다. 수정·재배포·상업적 사용이 가능하며 저작권 및 라이선스 고지를 유지해야 합니다. 무료 로컬 설치형과 향후 유료 공용 MCP는 별도의 서비스 이용 방식입니다. [제3자 구성 요소](docs/third-party.md) · [폰트 라이선스](docs/fonts.md)
 
 개발자는 [구조·개발·검증 안내](docs/development.md), [MCP 상세 계약](docs/mcp.md), [한국어 번역 실행 시스템](docs/translation-workflow.md)을 참고하세요.
