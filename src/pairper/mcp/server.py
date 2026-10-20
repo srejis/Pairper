@@ -7,11 +7,11 @@ from typing import Any
 from mcp import types
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
-
 from pairper.document.models import Block, Document, Omission, Region
 from pairper.storage.library import Library
-from pairper.translation.mcp import register_translation_tools
 from pairper.update import PaperUpdates
+
+from pairper.translation.mcp import register_translation_tools
 
 WORKFLOW = """Pairper 원본 기반 논문 재구성 절차:
 1. list_pending_papers로 대상을 찾는다. 명시적 교정은 begin_view_build(revise_existing=true)를
@@ -53,8 +53,9 @@ list_pending_papers는 원문 재구성만 조회하므로 전체 업데이트 �
 실제 원어 제목·부제를 확인한 title 블록을 읽기 순서로 골라 confirm_paper_title에 보낸다.
 메타데이터나 파일명만으로 제목을 확인했다고 선언하지 않는다. 제목이 불확실하면 보류하고 사유를 보고한다.
 원본 파일명·PDF·source·이전 view는 유지한다. 라이브러리 대표 제목만 갱신한다.
-4. korean이 필요하면 get_translation_guide를 읽고 기존 translation session을 재개하거나
-begin_translation으로 현재 원문에 대응하는 세션을 시작한다. 기존 완료 번역은 재사용한다.
+4. korean이 필요하면 get_translation_guide를 읽고 start_translation_workflow로 현재원문 기반 실행을 시작/재개한다.
+run_translation_workflow를 실행하고 get_translation_workflow_report로 생성·독립검토·수정 상태를 확인한다.
+ready인 실행만 finalize_translation_workflow로 로컬확정한다. 기존 완료 번역의 재사용과 새실험은 구분한다.
 원문 보존·실제 대조·검토·확정 절차를 지킨다. 한국어 해석은 번역이며 설명·해설은 추가하지 않는다.
 5. 재구성/제목/번역은 부분 완료를 보존한다. 한 단계 실패로 다른 완료 결과를 버리지 않는다.
 마지막에 list_paper_updates(include_complete=true)로 각 단계의 실제 결과와 남은 작업을 확인한다.

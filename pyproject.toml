@@ -7,11 +7,12 @@ name = "pairper"
 version = "0.1.0"
 description = "Source-faithful, local-first academic paper reader"
 requires-python = ">=3.11"
-dependencies = ["PySide6>=6.8,<7", "PyMuPDF>=1.25,<2", "pydantic>=2.10,<3", "platformdirs>=4,<5", "mcp==2.3.0"]
+dependencies = ["PySide6>=6.8,<7", "PyMuPDF>=1.25,<2", "pydantic>=2.10,<3", "platformdirs>=4,<5", "mcp==2.3.0", "jsonschema>=4.23,<5"]
 
 [project.scripts]
 pairper = "pairper.app.main:main"
 pairper-mcp = "pairper.mcp.server:main"
+pairper-translate = "pairper.translation.cli:main"
 
 [dependency-groups]
 dev = ["pytest>=8,<10", "pytest-asyncio>=1,<2", "ruff>=0.12"]

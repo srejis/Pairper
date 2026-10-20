@@ -1,0 +1,8 @@
+{
+  "origin": "Edge Pruning original source subset",
+  "source_bundle_sha256": "02e426ca9434dbaee40987ce819fb643ccd0b21a972851a4f240532aadacf214",
+  "source_pdf_sha256": "4328ab4c5168aee715e3be88f528414527d57c12adb4cc006417ce3d0ffddc8f",
+  "scope": "Two original text units, one equation, one text-free title rule. Original unit fingerprints and source refs retained. No Korean, translations, reviews or evaluation outputs.",
+  "original_crop_sha256": "9d1a2a8fc4d743597e02fce594ac2acff5e462b45d69af94444f49b5f47b343b",
+  "test_fixture_not_a_full_paper": true
+}

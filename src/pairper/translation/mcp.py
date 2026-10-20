@@ -7,7 +7,11 @@ from mcp import types
 from .contract import Entry, FigureReview, MathOverlay, MathRole, Result
 from .service import TranslationService
 
-GUIDE = '''Pairper 2단계는 원문을 한국어로 옮기는 번역이다. 설명·해설·요약은 추가하지 않는다.
+GUIDE = '''자동 실행은 start_translation_workflow→run_translation_workflow→get_translation_workflow_report를 우선 사용한다.
+이 흐름은 프로그램이 원문·문맥·실제이미지를 선택하고 실제 AI 생성·별도검토·수정·재검증을 실행한다.
+needs_review 상태를 완료로 바꾸거나 개별수정으로 전체실행을 대체하지 않는다. 새실험은 이전한국어를 가져오지 않는다.
+아래 개별 도구는 진단/명시적수동작업용이며 전체시스템 실행 완료의 대체물이 아니다.
+Pairper 2단계는 원문을 한국어로 옮기는 번역이다. 설명·해설·요약은 추가하지 않는다.
 원본 문서와 번역을 별도 보관하며 기존 원문 재구성 도구에 한국어를 쓰지 않는다.
 1. begin_translation으로 원문·현재 뷰·그림 해시를 고정한 실험을 시작한다.
    서로 다른 가설은 experiment_id로 분리한다. 기존 초안을 덮어 초기화하지 않는다.
@@ -123,3 +127,6 @@ def register_translation_tools(server, library, tool, directory=None):
     def translate_papers() -> str:
         """Translate full source papers faithfully into Korean, without added explanations."""
         return GUIDE
+
+    from .workflow_mcp import register_workflow_tools
+    register_workflow_tools(server, library, tool, directory=directory)
