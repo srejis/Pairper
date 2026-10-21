@@ -30,7 +30,9 @@ export interface DocumentBlock {
   parent_id?: string | null;
   relations?: { kind: 'caption_of' | 'proof_of' | 'footnote_for' | 'refers_to'; target_id: string }[];
 }
+export interface SourceIdentity {source_pdf_sha256: string; view_id: string; view_sha256: string; source_snapshot_sha256: string}
 export interface DisplayDocument {
+  source_identity?: SourceIdentity;
   translation?: { status: 'draft' | 'published'; complete: boolean; missing_unit_count: number };
   display_schema_version: '1.0'; source_schema_version: '1.0' | '1.1';
   paper_id: string; view_id: string; blocks: DocumentBlock[];
@@ -43,6 +45,7 @@ export interface ConnectionStatus {
   changed_at?: string; retry_in_seconds?: number | null;
 }
 export interface PairperApi {
+  getExplanations?(paperId: string, translationSessionId?: string): Promise<ExplanationBundle>;
   listTranslations?(paperId: string): Promise<{ session_id: string; status: 'draft' | 'published'; revision: number }[]>;
   getTranslationDocument?(sessionId: string): Promise<DisplayDocument>;
   copyUpdateRequest(paperId: string): Promise<{copied: boolean}>;
@@ -56,4 +59,22 @@ export interface PairperApi {
   reconnectTunnel?(): Promise<ConnectionStatus>;
   onConnectionChanged?(listener: () => void): () => void;
   onLibraryChanged(listener: () => void): () => void;
+}
+export type ExplanationSegment = {kind: 'text'; text: string} | {kind: 'math'; latex: string};
+export interface ExplanationAnchor {
+  block_id: string; field: string; run_index: number | null; start: number | null; end: number | null;
+  source_text: string;
+}
+export interface ExplanationTarget extends ExplanationAnchor {
+  id: string; kind: 'term' | 'math'; display: boolean; concept_key?: string;
+  anchor_type?: 'text_math'; anchor_text?: string;
+  text_parts?: {run_index: number; start: number; end: number; text: string}[];
+  localized?: (Omit<ExplanationAnchor, 'source_text'> & {text: string})[];
+}
+export type Explanation = {target_id: string; kind: 'term'; category: string; description: ExplanationSegment[]}
+  | {target_id: string; kind: 'math'; math_role?: 'symbol' | 'formula' | 'literal' | 'notation'; exclusion_reason?: string; symbols: {symbol: string; meaning: string}[];
+     meaning: ExplanationSegment[]; process: ExplanationSegment[]};
+export interface ExplanationBundle {
+  paper_id: string; source_identity: SourceIdentity; fingerprint: string;
+  targets: ExplanationTarget[]; explanations: Explanation[]; revision: number; status: string;
 }

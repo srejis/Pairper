@@ -7,11 +7,12 @@ from typing import Any
 from mcp import types
 from mcp.server import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
-from pairper.document.models import Block, Document, Omission, Region
-from pairper.storage.library import Library
-from pairper.update import PaperUpdates
 
+from pairper.document.models import Block, Document, Omission, Region
+from pairper.explanation.mcp import register_explanation_tools
+from pairper.storage.library import Library
 from pairper.translation.mcp import register_translation_tools
+from pairper.update import PaperUpdates
 
 WORKFLOW = """Pairper 원본 기반 논문 재구성 절차:
 1. list_pending_papers로 대상을 찾는다. 명시적 교정은 begin_view_build(revise_existing=true)를
@@ -44,11 +45,11 @@ finalize 성공과 실제 읽기 화면의 구조·표시 확인 후에만 완�
 구분한다. 수식·표·본문을 이미지로 우회하거나 불확실한 부분을 추측해서 완료하지 않는다.
 """
 
-UPDATE_WORKFLOW = """Pairper 논문 업데이트는 원문 재구성 + 한국어 해석 + 실제 논문 제목 반영이다.
+UPDATE_WORKFLOW = """Pairper 논문 업데이트는 원문 재구성 + 한국어 해석 + 실제 논문 제목 + 개념·용어·수식 해설이다.
 1. list_paper_updates로 논문별 needs를 확인한다. 특정 paper_id가 지정되면 그 논문만 처리한다.
 list_pending_papers는 원문 재구성만 조회하므로 전체 업데이트 대상 판정에 쓰지 않는다.
 2. reconstruction이 필요할 때만 아래 원본 재구성 절차로 생성·검증·확정한다.
-기존 유효한 뷰는 재생성하지 않는다. 원문이 준비되면 나머지 두 작업을 각각 이어서 수행한다.
+기존 유효한 뷰는 재생성하지 않는다. 원문이 준비되면 나머지 작업을 각각 이어서 수행한다.
 3. title이 필요하면 get_paper_title_candidates와 원본 제목 페이지 이미지를 읽는다.
 실제 원어 제목·부제를 확인한 title 블록을 읽기 순서로 골라 confirm_paper_title에 보낸다.
 메타데이터나 파일명만으로 제목을 확인했다고 선언하지 않는다. 제목이 불확실하면 보류하고 사유를 보고한다.
@@ -57,9 +58,17 @@ list_pending_papers는 원문 재구성만 조회하므로 전체 업데이트 �
 run_translation_workflow를 실행하고 get_translation_workflow_report로 생성·독립검토·수정 상태를 확인한다.
 ready인 실행만 finalize_translation_workflow로 로컬확정한다. 기존 완료 번역의 재사용과 새실험은 구분한다.
 원문 보존·실제 대조·검토·확정 절차를 지킨다. 한국어 해석은 번역이며 설명·해설은 추가하지 않는다.
-5. 재구성/제목/번역은 부분 완료를 보존한다. 한 단계 실패로 다른 완료 결과를 버리지 않는다.
+5. explanations가 필요하면 get_explanation_guide를 먼저 읽고 start_explanation_workflow로 시작/재개한다.
+run_explanation_workflow를 실행하고 get_explanation_workflow_report로 실제 진행·오류를 확인한다.
+자동 게시하지 않았다면 ready 상태에서만 publish_explanation_workflow로 검토 결과를 게시한다.
+해설은 개념·전문용어와 독립/인라인 수식에만 붙인다. 문장·일반 구 해설은 만들지 않는다.
+용어는 종류를 먼저 밝히고 직접 설명한다. 수식은 논문 문맥에 근거한 기호 설명과 의미,
+계산 과정을 작성한다. 설명 의미를 먼저 쓰고 이어서 해당 수학 기호를 배치한다.
+사용자와 합의한 해설 규칙은 프로그램의 생성·독립검토·수정 과정을 통해 적용한다.
+전체 workflow 검토 완료 후에만 게시한다. 게시한 해설은 원문/번역과 분리되어 클릭으로 열린다.
+6. 재구성/제목/번역/해설은 부분 완료를 보존한다. 한 단계 실패로 다른 완료 결과를 버리지 않는다.
 마지막에 list_paper_updates(include_complete=true)로 각 단계의 실제 결과와 남은 작업을 확인한다.
-완료는 세 단계가 모두 충족됐을 때만 보고한다. 재요청은 미완료 작업만 이어서 처리한다.
+완료는 네 작업이 모두 충족됐을 때만 보고한다. 재요청은 미완료 작업만 이어서 처리한다.
 """
 
 RECONSTRUCTION_GUIDE = """원본 위치와 읽기 단위는 다르다.
@@ -239,10 +248,11 @@ def create_server(library: Library | None = None, translation_directory=None):
 
     @server.prompt()
     def update_papers() -> str:
-        """Complete missing reconstruction, Korean translation and source-verified library titles."""
+        """Complete missing reconstruction, Korean translation, titles and reviewed explanations."""
         return UPDATE_WORKFLOW + "\n" + WORKFLOW
 
     register_translation_tools(server, library, tool, directory=translation_directory)
+    register_explanation_tools(server, library, tool)
     return server
 
 

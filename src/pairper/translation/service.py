@@ -34,19 +34,24 @@ class TranslationService:
     def display(self, session_id):
         from pairper.document.presentation import display_document
 
-        from .projection import project_display
+        from .math_partition import project_translation_bundle
         bundle = self.current_bundle(session_id)
         saved = self.store.read(session_id, bundle['fingerprint'])
         base = display_document(self.library, bundle['paper_id'])
         # The source can change while the normal display serializer runs.
         assert_current(self.library, bundle)
-        projected = project_display(bundle, saved['result'], base)
+        projected = project_translation_bundle(bundle, saved['result'], base)
         projected['translation'].update(session_id=session_id, revision=saved['revision'], status=saved['status'])
         return projected
 
     def current_bundle(self, session_id):
         bundle = self.store.source_bundle(session_id)
         assert_current(self.library, bundle)
+        if bundle.get('math_partition'):
+            from .math_partition import validate_partition_bundle
+            from .partition_planning import validate_native_partition_binding
+            original = validate_partition_bundle(bundle)
+            validate_native_partition_binding(original, bundle['math_partition'], self.directory / 'math-partitions')
         return bundle
 
     def report(self, session_id, offset=0, limit=100):

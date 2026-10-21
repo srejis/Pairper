@@ -177,8 +177,9 @@ def test_cli_needs_review_has_nonzero_exit_and_no_fake_commit(interfaces, monkey
 
 def test_cli_nonexistent_paper_is_failure_not_empty_success(interfaces, capsys):
     workflow, _, _ = interfaces
-    assert cli.main(['foreign-paper-id','--experiment','missing','--plan-only']) == 1
-    assert json.loads(capsys.readouterr().out)['status'] == 'failed'
+    assert cli.main(['foreign-paper-id','--experiment','missing','--plan-only']) == 2
+    rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert rows[-1]['event'] == 'finished' and rows[-1]['papers'][0]['status'] == 'failed'
     with workflow.connect() as con:
         assert con.execute('SELECT count(*) FROM runs').fetchone()[0] == 0
 
@@ -189,8 +190,9 @@ def test_cli_prefilled_same_experiment_is_rejected(interfaces, capsys):
     unit = service.bundle['units'][0]
     service.store.save(saved['session_id'],service.bundle['fingerprint'],0,
         entries=[Entry(action='translate',source_unit_ids=[unit['id']],source_fingerprint=sha([unit['fingerprint']]),target='외부 기존 번역').model_dump()])
-    assert cli.main([service.bundle['paper_id'],'--experiment','prefilled','--plan-only']) == 1
-    assert json.loads(capsys.readouterr().out)['status'] == 'failed'
+    assert cli.main([service.bundle['paper_id'],'--experiment','prefilled','--plan-only']) == 2
+    rows = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert rows[-1]['event'] == 'finished' and rows[-1]['papers'][0]['status'] == 'failed'
     assert service.store.read(saved['session_id'],service.bundle['fingerprint'])['revision'] == 1
 
 

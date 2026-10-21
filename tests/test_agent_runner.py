@@ -15,7 +15,7 @@ from pairper.translation.prompts import build_prompt, project_request, response_
 
 
 def translation():
-    return {"items": [{"unit_id": "u1", "action": "translate", "target": "모델은 정답을 사용하면 안 된다.", "reason": "Negated prohibition retained"}], "issues": [], "notes": []}
+    return {"items": [{"unit_id": "u1", "action": "translate", "target": "모델은 정답을 사용하면 안 된다.", "reason": "Negated prohibition retained"}], "issues": [], "notes": [], "source_concerns": []}
 
 
 def request():
@@ -28,7 +28,7 @@ def review_request():
 
 
 def review():
-    return {"items": [{"item_id": "u1", "verdict": "pass", "source_compared": True, "source_quote": "must not", "target_quote": "안 된다", "checks": ["The whole pair retains a prohibition rather than permission."], "issues": []}], "issues": [], "notes": []}
+    return {"items": [{"item_id": "u1", "verdict": "pass", "source_compared": True, "source_quote": "must not", "target_quote": "안 된다", "checks": ["The whole pair retains a prohibition rather than permission."], "issues": []}], "issues": [], "notes": [], "source_concerns": []}
 
 
 class FakeProcess:
@@ -136,7 +136,7 @@ class RunnerTests(unittest.TestCase):
     def test_missing_identity_duplicate_and_foreign_item_are_not_accepted(self):
         for items in ([], [translation()['items'][0]] * 2, [{**translation()['items'][0], 'unit_id': 'foreign'}]):
             with self.subTest(items=items), self.assertRaises(RunnerError):
-                self.run_fake(result={"items": items, "issues": [], "notes": []})
+                self.run_fake(result={"items": items, "issues": [], "notes": [], "source_concerns": []})
 
     def test_tool_trace_rejected_without_retry(self):
         runner = CodexRunner(max_retries=2)
@@ -210,7 +210,7 @@ class RunnerTests(unittest.TestCase):
 
     def test_no_fabricated_figure_image_seen_or_unanchored_label(self):
         figure={'figures':[{'block_id':'f1','image_inspected':True,'labels_complete':True,'labels':[],
-            'unresolved_errors':[],'no_translatable_text_reason':'only symbols'}],'issues':[],'notes':[]}
+            'unresolved_errors':[],'no_translatable_text_reason':'only symbols'}],'issues':[],'notes':[],'source_concerns':[]}
         with self.assertRaises(ValueError):validate_protocol({'phase':'generate','kind':'figure'},figure,image_count=0)
         figure['figures'][0]['labels']=[{'source':'a','target':'가','source_refs':[],'bbox':[]}]
         with self.assertRaises(ValueError):validate_protocol({'phase':'generate','kind':'figure'},figure,image_count=1)
@@ -281,12 +281,168 @@ class RunnerTests(unittest.TestCase):
             self.assertIn('Foreign node index7',build_prompt(req))
         self.assertIn('never change or infer new source content',build_prompt(req))
 
+    def test_source_verification_feedback_only_reaches_generation_or_repair_not_fresh_review(self):
+        feedback={'bundle_fingerprint':'current-source','notes':['INDEPENDENT_PDF_LITERAL_OBSERVATION'],
+                  'findings':[],'artifact_dir':'host-audit-directory'}
+        for phase in ('generate','repair'):
+            req=request();req.update(phase=phase,source_verification_feedback=feedback)
+            projected=project_request(req)
+            self.assertEqual(projected['source_verification_feedback'],feedback)
+            self.assertIn('INDEPENDENT_PDF_LITERAL_OBSERVATION',build_prompt(req))
+            projected['source_verification_feedback']['notes'].append('caller mutation')
+            self.assertEqual(req['source_verification_feedback'],feedback)
+        for phase in ('review','assembly_qa'):
+            req=review_request();req.update(phase=phase,source_verification_feedback=feedback)
+            self.assertNotIn('source_verification_feedback',project_request(req))
+            self.assertNotIn('INDEPENDENT_PDF_LITERAL_OBSERVATION',build_prompt(req))
+        self.assertIn('not a translation\napproval',build_prompt(request()))
+        self.assertIn('retain a concrete source_concerns entry',build_prompt(request()))
+
     def test_general_source_anomaly_policy_distinguishes_faithfulness_from_source_repair(self):
         prompt=build_prompt(request())
         self.assertIn('record the exact original evidence in notes',prompt)
         self.assertIn('A source-faithful pair can pass',prompt)
         self.assertIn('confirmed\nextraction loss',prompt)
         self.assertNotIn('Deja',prompt)
+
+    def test_source_concerns_is_explicit_required_field_except_source_only_protocols(self):
+        for kind in ('text','math','figure'):
+            for phase in ('generate','repair','review','assembly_qa'):
+                self.assertIn('source_concerns',response_schema({'phase':phase,'kind':kind})['required'])
+        self.assertNotIn('source_concerns',response_schema({'phase':'source_scan','kind':'math'})['properties'])
+        self.assertNotIn('source_concerns',response_schema({'phase':'review','kind':'math','source_repair_review':True})['properties'])
+        prompt=build_prompt(request())
+        self.assertIn('source_concerns is a separate required list',prompt)
+        self.assertIn('outside primary targets',prompt)
+        self.assertIn('faithfully retained authorial defects',prompt)
+        missing=translation();del missing['source_concerns']
+        with self.assertRaises(RunnerError):
+            self.run_fake(CodexRunner(max_retries=0),result=missing)
+
+    def test_figure_label_anchors_are_local_per_occurrence_and_reviewed_visually(self):
+        task={'figure':{'block_id':'figure','region':{'page':2,'bbox':[10,20,400,200]}}}
+        generation=build_prompt({'phase':'generate','kind':'figure','task':task})
+        self.assertIn('WHOLE FIGURE, not a label location',generation)
+        self.assertIn('tight per-occurrence bbox',generation)
+        self.assertIn('each spatial occurrence',generation)
+        self.assertIn('separate label row',generation)
+        self.assertIn('keep labels_complete=false',generation)
+        req={'phase':'review','kind':'figure','task':task,
+             'review_items':[{'item_id':'figure@label0','source':'Repeated source label',
+                              'target':'Repeated target label','source_unit_ids':[]}]}
+        review_prompt=build_prompt(req)
+        self.assertIn('exact source phrase is actually inside',review_prompt)
+        self.assertIn('correct translation with',review_prompt)
+        self.assertIn('whole-figure bbox fails spatial comparison',review_prompt)
+        self.assertIn('every occurrence',review_prompt)
+        self.assertIn('Return repair for a concrete bad anchor',review_prompt)
+        self.assertIn('return unresolved',review_prompt)
+
+    def test_original_figure_authority_diagnosis_is_scoped_not_a_blanket_ocr_waiver(self):
+        candidate={'figures':[{'block_id':'f','labels':[{'source':'Layer Num.','target':'층 번호',
+                    'source_refs':['label-span'],'bbox':[]}]}],'notes':['UNAPPROVED_CANDIDATE_CONTEXT']}
+        req={'phase':'source_scan','kind':'math','task':{'figure':{'block_id':'f','region':{'page':1,'bbox':[0,0,10,10]}},
+             'figure_source_spans':[{'id':'tick','text':'5','page':1,'bbox':[1,1,2,2]}]},
+             'candidate_to_inspect':candidate,'source_math':{},'notes_to_investigate':['tick missing minus']}
+        self.assertEqual(project_request(req)['candidate_to_inspect'],candidate)
+        req['candidate_to_inspect']={'items':[{'item_id':'f','verdict':'unresolved'}]}
+        req['current_translation_candidate']=candidate
+        req['figure_output_evidence']={'image_sha256':'original-raster','emitted_labels':[],
+                                       'retained_label_count':15}
+        req['figure_label_evidence']={'selected_labels':1,'omitted_label_ids':[]}
+        projected=project_request(req)
+        for key in ('current_translation_candidate','figure_output_evidence','figure_label_evidence'):
+            self.assertEqual(projected[key],req[key])
+        projected['figure_output_evidence']['emitted_labels'].append('mutation')
+        self.assertEqual(req['figure_output_evidence']['emitted_labels'],[])
+        prompt=build_prompt(req)
+        self.assertIn('CURRENT UNAPPROVED',prompt)
+        self.assertIn('findings=[] is possible',prompt)
+        self.assertIn('If impact cannot be established, retain unresolved',prompt)
+        self.assertIn('NOT translation/spatial approval',prompt)
+        self.assertIn('TRIGGER RESPONSE',prompt)
+        self.assertIn('Raw retained candidate labels are NOT rendered text',prompt)
+        self.assertIn('emitted glossary rows and preserved raster SHA',prompt)
+        for phase in ('generate','repair','review','assembly_qa'):
+            other={**req,'phase':phase,'kind':'figure'}
+            self.assertNotIn('candidate_to_inspect',project_request(other))
+            self.assertNotIn('current_translation_candidate',project_request(other))
+            for key in ('figure_output_evidence','figure_label_evidence'):
+                if phase=='generate':
+                    self.assertNotIn(key,project_request(other))
+                else:
+                    self.assertEqual(project_request(other)[key],req[key])
+            self.assertNotIn('UNAPPROVED_CANDIDATE_CONTEXT',build_prompt(other))
+        generation=build_prompt({'phase':'generate','kind':'figure','task':req['task']})
+        self.assertIn('Pure numeric/math ticks',generation)
+        self.assertIn('actual output',generation)
+        review=build_prompt({'phase':'review','kind':'figure','task':req['task']})
+        self.assertIn('auxiliary-only discrepancy',review)
+        self.assertIn('Do not waive image/label coverage review',review)
+
+    def test_fresh_figure_review_and_repair_receive_neutral_current_output_and_local_crops(self):
+        output={'projection_available':True,'block_id':'f','candidate_sha256':'current-draft',
+                'original_raster_unchanged':True,'original_crop_sha256':'native',
+                'emitted_translation_labels':[{'source':'Total cost','target':'총비용'}],
+                'translation_approval_granted':False}
+        crops={'total_labels':15,'selected_labels':15,'omitted_label_ids':[],
+               'semantic_review_performed':False,'rendered_images_verified':False}
+        req={'phase':'review','kind':'figure','task':{'figure':{'block_id':'f'}},
+             'figure_review_evidence_version':'actual-output-and-local-crops-v1',
+             'figure_output_evidence':output,'figure_label_evidence':crops,
+             'candidate':{'reason':'HIDDEN_TRANSLATOR_REASON'},
+             'current_translation_candidate':{'reason':'HIDDEN_RAW_CANDIDATE'},
+             'candidate_to_inspect':{'notes':['HIDDEN_TRIGGER_VERDICT']},
+             'source_verification_feedback':{'notes':['HIDDEN_SOURCE_DIAGNOSIS']},
+             'issues':[{'detail':'HIDDEN_OLD_ISSUE'}],
+             'original_page_images':[{'path':'tiny.png','sha256':'tinyhash','label_id':'f@label2',
+                'block_id':'f','page':8,'region':{'page':8,'bbox':[1,2,3,4]},'scale':38.47}],
+             'attached_images':[{'path':'tiny.png','sha256':'tinyhash'}],
+             'review_items':[]}
+        for phase in ('review','assembly_qa','repair'):
+            request={**req,'phase':phase}
+            projected=project_request(request)
+            self.assertEqual(projected['figure_output_evidence'],output)
+            self.assertEqual(projected['figure_label_evidence'],crops)
+            self.assertEqual(projected['figure_review_evidence_version'],'actual-output-and-local-crops-v1')
+            self.assertEqual(projected['attached_images'][0]['role'],'original_figure_label')
+            self.assertEqual(projected['attached_images'][0]['label_id'],'f@label2')
+            self.assertEqual(projected['attached_images'][0]['scale'],38.47)
+            self.assertNotIn('current_translation_candidate',projected)
+            self.assertNotIn('candidate_to_inspect',projected)
+            prompt=build_prompt(request)
+            if phase!='repair':
+                for hidden in ('HIDDEN_TRANSLATOR_REASON','HIDDEN_RAW_CANDIDATE','HIDDEN_TRIGGER_VERDICT',
+                               'HIDDEN_SOURCE_DIAGNOSIS','HIDDEN_OLD_ISSUE'):
+                    self.assertNotIn(hidden,prompt)
+            self.assertIn('source==target labels are metadata',prompt)
+            projected['figure_output_evidence']['emitted_translation_labels'].clear()
+            self.assertEqual(len(output['emitted_translation_labels']),1)
+        text=project_request({**req,'kind':'text'})
+        self.assertNotIn('figure_output_evidence',text)
+        self.assertNotIn('figure_label_evidence',text)
+
+    def test_neutral_glyph_metadata_is_available_in_all_source_and_translation_phases(self):
+        evidence={'available':True,'original_pdf_sha256':'current-original',
+                  'units':[{'unit_id':'code/runs','unicode':[8216,8216,8216]}],
+                  'fonts':[{'Encoding':'neutral','ToUnicode':'original-mapping'}]}
+        for phase in ('generate','repair','review','assembly_qa','source_scan'):
+            req={'phase':phase,'kind':'text','task':{},'source_glyph_evidence':evidence,
+                 'source_verification_feedback':{'notes':['OLD_SCAN_VERDICT']}}
+            projected=project_request(req)
+            self.assertEqual(projected['source_glyph_evidence'],evidence)
+            projected['source_glyph_evidence']['units'].clear()
+            self.assertEqual(len(evidence['units']),1)
+            if phase in ('review','assembly_qa'):
+                self.assertNotIn('OLD_SCAN_VERDICT',build_prompt(req))
+            self.assertIn('original-PDF',build_prompt(req))
+        schema=response_schema({'phase':'source_scan','kind':'math'})
+        self.assertIn('math_boundary_transfer',schema['properties']['findings']['items']['properties']['kind']['enum'])
+        prompt=build_prompt({'phase':'source_scan','kind':'math','task':{}})
+        self.assertIn('donor_runs',prompt)
+        self.assertIn('zero-based',prompt)
+        self.assertIn('faithful',prompt)
+        self.assertIn('isolated math_latex',prompt)
 
     def test_projection_math_ast_and_figure_anchors_kept_exact(self):
         req={'phase':'generate','kind':'math','task':{'math_items':[{

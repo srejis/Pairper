@@ -253,8 +253,20 @@ class Library:
         if not path.exists():
             data = self.image(paper_id, region.page, region, 2)
             temp = path.with_suffix("." + uuid.uuid4().hex + ".tmp")
-            temp.write_bytes(data)
-            os.replace(temp, path)
+            try:
+                temp.write_bytes(data)
+                if os.name == 'nt':
+                    # Another reader may publish the same immutable asset and Qt
+                    # may already hold it open. Windows rename never overwrites
+                    # that winning file, unlike replace which raises WinError 5.
+                    os.rename(temp, path)
+                else:
+                    os.replace(temp, path)
+            except OSError:
+                if not path.is_file():
+                    raise
+            finally:
+                temp.unlink(missing_ok=True)
         return key
 
     def begin(self, paper_id, source_sha256, revise_existing=False):

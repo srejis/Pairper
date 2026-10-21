@@ -79,7 +79,7 @@ def test_source_repair_restarts_empty_without_accepting_triggering_response(setu
         def run(self, request, schema, images, directory):
             claim = {'request':request}
             response = review(claim) if request['phase'] == 'review' else draft(claim)
-            response['notes'] = ['Original PDF may differ; independently inspect source.']
+            response['source_concerns'] = ['Original PDF may differ; independently inspect source.']
             return response
     run = workflow.start(service.bundle['paper_id'], 'source-restart-'+phase)
     if phase == 'review':
@@ -108,7 +108,7 @@ def test_source_scan_failure_is_bounded_and_does_not_accept_translation(setup_wo
     class ObservationRunner:
         def run(self, request, *_):
             response = draft({'request':request})
-            response['notes'] = ['Inspect source transcription.']
+            response['source_concerns'] = ['Inspect source transcription.']
             return response
     workflow.runner = ObservationRunner()
     run = workflow.start(service.bundle['paper_id'], 'failed-source-scan')
@@ -132,6 +132,24 @@ def test_transient_source_image_failure_recovers_without_losing_task(setup_workf
     assert workflow.commit(run['run_id'])['status'] == 'ready'
 
 
+def test_general_notes_do_not_trigger_extra_source_inference(setup_workflow):
+    workflow, service = setup_workflow()
+    class NoSourceConcern:
+        def scan(self, *_):
+            raise AssertionError('General notes are not source findings')
+    class NotesRunner:
+        def run(self, request, *_):
+            response = draft({'request': request})
+            response['notes'] = ['A faithful authorial inconsistency was preserved.']
+            response['source_concerns'] = []
+            return response
+    workflow.source_repairer = NoSourceConcern()
+    workflow.runner = NotesRunner()
+    run = workflow.start(service.bundle['paper_id'], 'notes-without-source-loss')
+    report = workflow.step(run['run_id'])
+    assert report['counts']['drafted'] == 1 and not report['errors']
+
+
 def test_cli_source_restart_limit_stops_without_accepting_any_old_candidates(interfaces, monkeypatch, capsys):
     _, service, _ = interfaces
     repairs = []
@@ -146,7 +164,7 @@ def test_cli_source_restart_limit_stops_without_accepting_any_old_candidates(int
     class ObservationRunner:
         def run(self, request, *_):
             response = draft({'request':request})
-            response['notes'] = ['Inspect possible source transcription discrepancy.']
+            response['source_concerns'] = ['Inspect possible source transcription discrepancy.']
             return response
         def cancel(self): pass
     monkeypatch.setattr(cli, 'SourceRepairer', lambda *_: RepeatedSourceRepairer())
@@ -179,7 +197,7 @@ def test_confirmed_unresolved_source_stops_once_without_accepting_candidate(setu
         def run(self, request, *_):
             calls['model'] += 1
             response = draft({'request':request})
-            response['notes'] = ['Inspect an unresolved original-source ambiguity.']
+            response['source_concerns'] = ['Inspect an unresolved original-source ambiguity.']
             return response
     workflow.source_repairer = UnresolvedRepairer()
     workflow.runner = ObservationRunner()

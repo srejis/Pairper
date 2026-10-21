@@ -1,0 +1,39 @@
+{
+  "figure": {
+    "paper_id": "d7f0626d56f7496a85db5e8bdc5080a4",
+    "block_id": "test-isolated-lm-head",
+    "region": {
+      "page": 2,
+      "bbox": [
+        168,
+        81,
+        226,
+        98
+      ],
+      "rotation": 0
+    },
+    "crop": "isolated-lm-head-original.png",
+    "crop_sha256": "cff6572e7268224b921c2b2a580c08f1d65cb84ccdfcb7a544083b2cb4396a7e"
+  },
+  "block": {
+    "id": "test-isolated-lm-head",
+    "type": "figure",
+    "order": 999,
+    "source_refs": [],
+    "content": {
+      "region": {
+        "page": 2,
+        "bbox": [
+          168,
+          81,
+          226,
+          98
+        ],
+        "rotation": 0
+      }
+    }
+  },
+  "source_spans": [],
+  "source_only": true,
+  "provenance": "Exact original Edge PDF2 ROI around first LM-head box; single visible language-model-head label, no translated fixture."
+}

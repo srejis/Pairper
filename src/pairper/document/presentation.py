@@ -25,6 +25,14 @@ def load_document(library, paper_id, view_id=None):
 
 
 def display_document(library, paper_id):
+    # A view can retain its ID while a source repair replaces its JSON snapshot.
+    # Bind the exact bytes rendered, not merely the paper/view labels.
+    from pairper.translation.prepare import current_source
+
+    snapshot = library.paper(paper_id)
+    source_identity = (current_source(library, paper_id)[3]
+                       if snapshot.get('current_view_id') and snapshot['status'] == 'complete'
+                       else None)
     paper, document = load_document(library, paper_id)
     source = library.source(paper_id)
     spans = {s["id"]: {**s, "page": p["page"]} for p in source["pages"] for s in p["spans"]}
@@ -107,11 +115,14 @@ def display_document(library, paper_id):
                 ],
             }
         )
+    if source_identity is not None and current_source(library, paper_id)[3] != source_identity:
+        raise ValueError('Source changed while rendering; reload the document')
     return {
         "display_schema_version": DISPLAY_SCHEMA_VERSION,
         "source_schema_version": document.schema_version,
         "paper_id": paper_id,
         "view_id": paper["current_view_id"],
+        "source_identity": source_identity,
         "blocks": blocks,
         "normalization_audit": audit,
     }

@@ -93,6 +93,11 @@ class FrontendBridge(QObject):
             self.dispatch("_poll", self.paper_list)
 
     def paper_list(self):
+        explanation_db = self.library.root / 'explanations' / 'explanations.db'
+        try:
+            explanation_updated = str(explanation_db.stat().st_mtime_ns)
+        except FileNotFoundError:
+            explanation_updated = None
         papers = [
             {
                 key: p[key]
@@ -111,6 +116,7 @@ class FrontendBridge(QObject):
         ]
         with self.library.connect() as con:
             for paper in papers:
+                paper['explanation_updated_at'] = explanation_updated
                 original = self.library.paper(paper["id"])
                 paper["title"] = original["title"].strip() or paper["filename"]
                 paper["original_available"] = self.library.managed(
@@ -158,6 +164,25 @@ class FrontendBridge(QObject):
                 raise ValueError("Invalid paper ID")
             return display_document(self.library, paper_id)
 
+        self.dispatch(request_id, load)
+
+    @Slot(str, str, str)
+    def getExplanations(self, request_id, paper_id, translation_session_id):
+        def load():
+            if not re.fullmatch(r"[a-f0-9]{32}", paper_id):
+                raise ValueError("Invalid paper ID")
+            from pairper.explanation.service import ExplanationService
+            if translation_session_id and not re.fullmatch(r"[a-f0-9]{64}", translation_session_id):
+                raise ValueError("Invalid translation session")
+            service = ExplanationService(self.library)
+            saved = service.get(paper_id)
+            if saved["status"] != "published" or not saved["targets"]:
+                return saved
+            display = (self.translations().display(translation_session_id) if translation_session_id
+                       else display_document(self.library, paper_id))
+            if display.get("paper_id") != paper_id:
+                raise ValueError("Translation belongs to another paper")
+            return service.project(paper_id, display)
         self.dispatch(request_id, load)
 
     def translations(self):

@@ -1,0 +1,212 @@
+{
+  "figure": {
+    "paper_id": "d7f0626d56f7496a85db5e8bdc5080a4",
+    "block_id": "edge-p2-roi-fig1",
+    "region": {
+      "page": 2,
+      "bbox": [
+        107.0,
+        75.0,
+        505.0,
+        256.0
+      ],
+      "rotation": 0
+    },
+    "crop": "edge-fig1-original.png",
+    "crop_sha256": "8934d03cc01c8385937c99821ca7f9b7e4449a59d16e59369892703640f469ab"
+  },
+  "block": {
+    "id": "edge-p2-roi-fig1",
+    "type": "figure",
+    "order": 13,
+    "source_refs": [
+      "4328ab4c5168aee7-p2-b0-l0-s0",
+      "4328ab4c5168aee7-p2-b1-l0-s0",
+      "4328ab4c5168aee7-p2-b2-l0-s0",
+      "4328ab4c5168aee7-p2-b2-l1-s0",
+      "4328ab4c5168aee7-p2-b3-l0-s0",
+      "4328ab4c5168aee7-p2-b4-l0-s0",
+      "4328ab4c5168aee7-p2-b5-l0-s0"
+    ],
+    "content": {
+      "runs": [],
+      "level": 2,
+      "items": [],
+      "ordered": false,
+      "region": {
+        "page": 2,
+        "bbox": [
+          107.0,
+          75.0,
+          505.0,
+          256.0
+        ],
+        "rotation": 0
+      },
+      "latex": null,
+      "number_refs": [],
+      "cells": [],
+      "code_lines": [],
+      "source_verified": false,
+      "caption_id": null,
+      "figure_kind": null,
+      "asset_id": "c94e471f217e584f9306ec680c6623f1",
+      "group_role": null,
+      "source_regions": [],
+      "language": null
+    },
+    "parent_id": null,
+    "relations": [],
+    "validation_status": "source_verified"
+  },
+  "source_spans": [
+    {
+      "id": "4328ab4c5168aee7-p2-b0-l0-s0",
+      "text": "...",
+      "bbox": [
+        148.38430786132812,
+        195.86036682128906,
+        154.7078094482422,
+        203.5252227783203
+      ],
+      "font": "Type3 (73 0 R)",
+      "size": 7.664850234985352,
+      "flags": 0,
+      "direction": [
+        1.0,
+        0.0
+      ],
+      "order": 0,
+      "block": 0,
+      "line": 0,
+      "page": 2
+    },
+    {
+      "id": "4328ab4c5168aee7-p2-b1-l0-s0",
+      "text": "(a) Regular Transformer",
+      "bbox": [
+        126.14299774169922,
+        244.52096557617188,
+        213.332275390625,
+        253.48736572265625
+      ],
+      "font": "NimbusRomNo9L-Regu",
+      "size": 8.966400146484375,
+      "flags": 4,
+      "direction": [
+        1.0,
+        0.0
+      ],
+      "order": 1,
+      "block": 1,
+      "line": 0,
+      "page": 2
+    },
+    {
+      "id": "4328ab4c5168aee7-p2-b2-l0-s0",
+      "text": "Learnable ",
+      "bbox": [
+        339.06207275390625,
+        213.9608612060547,
+        365.3362121582031,
+        220.87498474121094
+      ],
+      "font": "Type3 (79 0 R)",
+      "size": 5.535725116729736,
+      "flags": 0,
+      "direction": [
+        1.0,
+        0.0
+      ],
+      "order": 2,
+      "block": 2,
+      "line": 0,
+      "page": 2
+    },
+    {
+      "id": "4328ab4c5168aee7-p2-b2-l1-s0",
+      "text": "binary masks",
+      "bbox": [
+        339.06207275390625,
+        219.9224090576172,
+        372.0962829589844,
+        226.83653259277344
+      ],
+      "font": "Type3 (79 0 R)",
+      "size": 5.535725116729736,
+      "flags": 0,
+      "direction": [
+        1.0,
+        0.0
+      ],
+      "order": 3,
+      "block": 2,
+      "line": 1,
+      "page": 2
+    },
+    {
+      "id": "4328ab4c5168aee7-p2-b3-l0-s0",
+      "text": "(b) Optimize edge masks",
+      "bbox": [
+        265.1300048828125,
+        244.52096557617188,
+        355.027099609375,
+        253.48736572265625
+      ],
+      "font": "NimbusRomNo9L-Regu",
+      "size": 8.966400146484375,
+      "flags": 4,
+      "direction": [
+        1.0,
+        0.0
+      ],
+      "order": 4,
+      "block": 3,
+      "line": 0,
+      "page": 2
+    },
+    {
+      "id": "4328ab4c5168aee7-p2-b4-l0-s0",
+      "text": "Upstream nodes",
+      "bbox": [
+        446.0953063964844,
+        228.01307678222656,
+        486.2044677734375,
+        234.87184143066406
+      ],
+      "font": "Type3 (109 0 R)",
+      "size": 5.535725116729736,
+      "flags": 0,
+      "direction": [
+        1.0,
+        0.0
+      ],
+      "order": 5,
+      "block": 4,
+      "line": 0,
+      "page": 2
+    },
+    {
+      "id": "4328ab4c5168aee7-p2-b5-l0-s0",
+      "text": "(c) Obtain sparse circuit",
+      "bbox": [
+        396.3479919433594,
+        244.52096557617188,
+        482.7481689453125,
+        253.48736572265625
+      ],
+      "font": "NimbusRomNo9L-Regu",
+      "size": 8.966400146484375,
+      "flags": 4,
+      "direction": [
+        1.0,
+        0.0
+      ],
+      "order": 6,
+      "block": 5,
+      "line": 0,
+      "page": 2
+    }
+  ],
+  "source_only": true
+}

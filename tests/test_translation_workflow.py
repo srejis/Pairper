@@ -75,7 +75,7 @@ def setup_workflow(tmp_path, monkeypatch):
 
 def draft(claim, suffix=''):
     task = claim['request']['task']
-    common = {'issues':[], 'notes':[]}
+    common = {'issues':[], 'notes':[], 'source_concerns':[]}
     if task['kind'] == 'text':
         return {**common, 'items':[{'unit_id':u['id'], 'action':'translate',
                  'target':'새 시험 번역 ' + str(i) + suffix, 'reason':'fresh test candidate'} for i,u in enumerate(task['units'])]}
@@ -99,7 +99,7 @@ def review(claim, verdict='pass'):
                      'source_quote':i['source'], 'target_quote':i['target'],
                      'checks':['Original/source candidate scope compared in this deterministic protocol test.'],
                      'issues':[] if verdict == 'pass' else ['Test reviewer requests a correction.']}
-                    for i in claim['request']['review_items']], 'issues':[], 'notes':[]}
+                    for i in claim['request']['review_items']], 'issues':[], 'notes':[], 'source_concerns':[]}
 
 
 def submit(workflow, claim, response):

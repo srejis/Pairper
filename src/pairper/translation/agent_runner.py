@@ -130,6 +130,14 @@ class CodexRunner:
         "in_app_chat", "in_app_local_automation", "agent_message_board",
     )
 
+    prompt_protocol_version = PROMPT_VERSION
+
+    def _build_prompt(self, request: dict) -> str:
+        return build_prompt(request)
+
+    def _validate_protocol(self, request: dict, response: dict, *, image_count: int) -> None:
+        validate_protocol(request, response, image_count=image_count)
+
     def __init__(self, cli_path: str | Path | None = None, *, timeout: float = 600,
                  max_retries: int = 2, cancel_event: threading.Event | None = None,
                  model: str | None = None, model_catalog_path: str | Path | None = None):
@@ -216,7 +224,7 @@ class CodexRunner:
         except ImportError as exc:
             raise RunnerError("jsonschema is required to validate actual AI output", kind="configuration") from exc
         jsonschema.Draft202012Validator.check_schema(schema)
-        prompt = build_prompt(request)
+        prompt = self._build_prompt(request)
         attached = [Path(path).resolve() for path in images]
         if any(not path.is_file() for path in attached):
             raise RunnerError("An attached original image is missing", kind="input")
@@ -237,7 +245,7 @@ class CodexRunner:
             "auth": "Existing Codex ChatGPT login; auth values not read or copied", "capabilities": capabilities,
             "source_request_sha256": hashlib.sha256(json.dumps(request, ensure_ascii=False, sort_keys=True).encode()).hexdigest(),
             "provider_prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
-            "prompt_protocol_version": PROMPT_VERSION,
+            "prompt_protocol_version": self.prompt_protocol_version,
             "raw_request_characters": len(json.dumps(request, ensure_ascii=False)),
             "provider_prompt_characters": len(prompt),
             "history": "Fresh empty temporary cwd each attempt, ephemeral, user config ignored, AGENTS disabled; no resume/history lookup"}
@@ -319,7 +327,7 @@ class CodexRunner:
                     raw = output.read_text(encoding="utf-8")
                     response = json.loads(raw)
                     jsonschema.Draft202012Validator(schema).validate(response)
-                    validate_protocol(request, response, image_count=len(attached))
+                    self._validate_protocol(request, response, image_count=len(attached))
                     record["status"] = "success"
                     evidence["status"] = "success"
                     evidence["response_sha256"] = hashlib.sha256(raw.encode()).hexdigest()

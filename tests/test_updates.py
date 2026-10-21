@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 from conftest import text_blocks
 
+from pairper.explanation.service import ExplanationService
 from pairper.translation.service import TranslationService
 from pairper.update import PaperUpdates
 
@@ -19,10 +20,10 @@ def reconstructed(library, pdf_path):
 def test_pending_includes_missing_title_and_translation(library, pdf_path):
     updates = PaperUpdates(library)
     library.register(pdf_path)
-    assert updates.list_updates()[0]['needs'] == ['reconstruction', 'title', 'korean']
+    assert updates.list_updates()[0]['needs'] == ['reconstruction', 'title', 'korean', 'explanations']
     reconstructed(library, pdf_path)
     assert library.list_papers(pending=True) == []
-    assert updates.list_updates()[0]['needs'] == ['title', 'korean']
+    assert updates.list_updates()[0]['needs'] == ['title', 'korean', 'explanations']
 
 
 def test_title_persists_without_changing_source_or_translations(library, pdf_path):
@@ -43,7 +44,7 @@ def test_title_persists_without_changing_source_or_translations(library, pdf_pat
     assert library.paper(paper['id'])['filename'] == pdf_path.name
     assert translations.current_bundle(started['session_id']) == bundle
     assert {p: hashlib.sha256(p.read_bytes()).hexdigest() for p in paths} == before
-    assert updates.list_updates()[0]['needs'] == ['korean']
+    assert updates.list_updates()[0]['needs'] == ['korean', 'explanations']
     with library.connect() as con:
         assert con.execute('SELECT COUNT(*) FROM paper_titles').fetchone()[0] == 1
 
@@ -68,6 +69,8 @@ def test_title_only_update_reuses_published_translation(library, pdf_path, monke
     monkeypatch.setattr(TranslationService, 'sessions', lambda self, pid: [{'session_id': 'saved'}])
     monkeypatch.setattr(TranslationService, 'report', lambda self, sid: {
         'session_id': sid, 'revision': 9, 'status': 'published', 'complete': True})
+    monkeypatch.setattr(ExplanationService, 'get', lambda self, pid: {
+        'status': 'published', 'revision': 4, 'explanations': [], 'complete': True})
     updates = PaperUpdates(library)
     assert updates.list_updates()[0]['needs'] == ['title']
     updates.confirm_title(paper['id'], paper['sha256'], paper['current_view_id'], ['b0'], True)
@@ -84,7 +87,23 @@ def test_failed_translation_lookup_keeps_title_work(library, pdf_path, monkeypat
     result = updates.list_updates()[0]
     assert result['errors']['korean'] == 'Damaged draft'
     updates.confirm_title(paper['id'], paper['sha256'], paper['current_view_id'], ['b0'], True)
-    assert updates.list_updates()[0]['needs'] == ['korean']
+    assert updates.list_updates()[0]['needs'] == ['korean', 'explanations']
+
+
+def test_explanation_status_alone_does_not_complete_paper(library, pdf_path, monkeypatch):
+    paper = reconstructed(library, pdf_path)
+    monkeypatch.setattr(TranslationService, 'sessions', lambda self, pid: [{'session_id': 'saved'}])
+    monkeypatch.setattr(TranslationService, 'report', lambda self, sid: {
+        'session_id': sid, 'revision': 9, 'status': 'published', 'complete': True})
+    explanation = {'status': 'published', 'revision': 1, 'explanations': [], 'complete': False}
+    monkeypatch.setattr(ExplanationService, 'get', lambda self, pid: explanation)
+    updates = PaperUpdates(library)
+    updates.confirm_title(paper['id'], paper['sha256'], paper['current_view_id'], ['b0'], True)
+    pending = updates.list_updates()[0]
+    assert pending['needs'] == ['explanations']
+    assert not pending['complete'] and not pending['explanations']['complete']
+    explanation['complete'] = True
+    assert updates.list_updates() == []
 
 
 def test_bridge_uses_saved_title_instead_of_pdf_metadata(library, pdf_path):

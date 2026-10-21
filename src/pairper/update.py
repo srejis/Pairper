@@ -5,6 +5,7 @@ import json
 from pairper.document.models import MathRun
 from pairper.document.provenance import materialize_ranges
 from pairper.document.text import resolved_runs
+from pairper.explanation.service import ExplanationService
 from pairper.storage.library import now
 from pairper.translation.prepare import current_source
 from pairper.translation.service import TranslationService
@@ -104,6 +105,7 @@ class PaperUpdates:
                               and title['view_id'] == paper['current_view_id']
                               and title['title'] == paper['title'])
             korean_done, session = False, None
+            explanation_done, explanation = False, None
             if reconstruction:
                 try:
                     sessions = translations.sessions(paper['id'])
@@ -113,8 +115,15 @@ class PaperUpdates:
                         korean_done = session['status'] == 'published' and session['complete']
                 except (ValueError, OSError) as exc:
                     errors['korean'] = str(exc)
+                try:
+                    explanation = ExplanationService(self.library).get(paper['id'])
+                    explanation_done = (explanation['status'] == 'published'
+                                        and explanation.get('complete', False))
+                except (ValueError, OSError) as exc:
+                    errors['explanations'] = str(exc)
             needed = [name for name, done in [('reconstruction', reconstruction),
-                                             ('title', title_done), ('korean', korean_done)] if not done]
+                                             ('title', title_done), ('korean', korean_done),
+                                             ('explanations', explanation_done)] if not done]
             if needed or include_complete:
                 result.append({'paper_id': paper['id'], 'title': paper['title'],
                                'filename': paper['filename'], 'source_sha256': paper['sha256'],
@@ -122,7 +131,13 @@ class PaperUpdates:
                                'complete': not needed, 'errors': errors,
                                'translation': {k: session[k] for k in
                                                ('session_id', 'revision', 'status', 'complete')}
-                               if session else None})
+                               if session else None,
+                               'explanations': {'status': explanation['status'],
+                                                'revision': explanation['revision'],
+                                                'complete': explanation_done,
+                                                'coverage': explanation.get('coverage'),
+                                                'item_count': len(explanation['explanations'])}
+                               if explanation else None})
         if paper_id is not None and not result:
             self.library.paper(paper_id)  # Distinguish an unknown ID from a completed target.
         return result

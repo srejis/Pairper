@@ -51,6 +51,7 @@ def project_display(bundle, result, base_display):
             for math, original in zip(unit['math'], originals, strict=True):
                 if original.get('latex') != math['latex']:
                     raise ValueError('Source display math differs')
+                original['source_math_id'] = math['token']
                 math_runs[math['token']] = deepcopy(original)
             if unit.get('cell'):
                 cell = block['content']['cells'][int(unit['field'].split('/')[1])]
@@ -64,6 +65,7 @@ def project_display(bundle, result, base_display):
                 if content.get('latex') != source['content']['latex']:
                     raise ValueError('Source equation differs')
                 mid = f'block:{block_id}/latex'
+                content['source_math_id'] = mid
                 if mid in overlays:
                     content['latex'] = overlays[mid]
     except (KeyError, IndexError, TypeError) as exc:
@@ -83,7 +85,8 @@ def project_display(bundle, result, base_display):
         for match in TOKEN.finditer(entry['target']):
             text = entry['target'][position:match.start()]
             if text:
-                translated.append({'kind': 'text', 'prefix': '', 'text': text})
+                translated.append({'kind': 'text', 'prefix': '', 'text': text,
+                                   'source_unit_ids': list(ids)})
             run = deepcopy(math_runs[match.group()])
             run['prefix'] = ''
             if match.group() in overlays:
@@ -91,7 +94,8 @@ def project_display(bundle, result, base_display):
             translated.append(run)
             position = match.end()
         if position < len(entry['target']):
-            translated.append({'kind':'text','prefix':'','text':entry['target'][position:]})
+            translated.append({'kind':'text','prefix':'','text':entry['target'][position:],
+                               'source_unit_ids': list(ids)})
         slots[ids[0]][:] = translated
         for unit_id in ids[1:]:
             slots[unit_id][:] = []

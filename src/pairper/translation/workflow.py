@@ -7,6 +7,7 @@ neither a model nor a structural check can declare the entire run complete.
 import copy
 import hashlib
 import json
+import re
 import sqlite3
 import time
 import uuid
@@ -22,11 +23,13 @@ from .contract import (
     sha,
     verify_result,
 )
+from .math_boundary import validate_math_sentence_boundaries
 from .math_contract import review_requirements as math_requirements
 from .math_contract import source_math
-from .prepare import prepare_bundle
+from .prepare import current_source, prepare_bundle
 
 VERSION = "source-generation-review-repair-v1"
+FIGURE_REVIEW_EVIDENCE_VERSION = 'actual-output-atlas-native-glyph-v3'
 
 
 def dumps(value):
@@ -34,15 +37,26 @@ def dumps(value):
 
 
 class Workflow:
-    def __init__(self, service, runner=None, max_repairs=3, max_failures=3, lease_seconds=1800,
-                 source_repairer=None):
+    def __init__(
+        self,
+        service,
+        runner=None,
+        max_repairs=3,
+        max_failures=3,
+        lease_seconds=1800,
+        source_repairer=None,
+    ):
         if not (0 <= max_repairs <= 10 and 1 <= max_failures <= 10 and lease_seconds > 0):
             raise ValueError("Invalid workflow retry limits")
         self.service, self.runner = service, runner
+        if source_repairer is not None:
+            from .partition_planning import PartitionAwareSourceRepairer
+            source_repairer = PartitionAwareSourceRepairer(source_repairer)
         self.source_repairer = source_repairer
         self.max_repairs, self.max_failures = max_repairs, max_failures
         self.lease_seconds = lease_seconds
         self._normalized_cache = {}
+        self._glyph_evidence_cache = {}
         self.directory = service.directory / "workflow"
         self.directory.mkdir(parents=True, exist_ok=True)
         self.db = self.directory / "workflow.db"
@@ -64,8 +78,15 @@ class Workflow:
                 task_id TEXT, phase TEXT NOT NULL, event TEXT NOT NULL,
                 input_hash TEXT, output_hash TEXT, payload TEXT NOT NULL, at REAL NOT NULL);
             """)
+            # Serialize the schema check and additive migrations across paper
+            # workers/processes sharing the same workflow store.
+            con.execute("BEGIN IMMEDIATE")
             if "last_response" not in {r["name"] for r in con.execute("PRAGMA table_info(tasks)")}:
                 con.execute("ALTER TABLE tasks ADD COLUMN last_response TEXT")
+            if "source_feedback" not in {
+                r["name"] for r in con.execute("PRAGMA table_info(tasks)")
+            }:
+                con.execute("ALTER TABLE tasks ADD COLUMN source_feedback TEXT")
 
     @contextmanager
     def connect(self):
@@ -105,12 +126,25 @@ class Workflow:
             "SELECT * FROM tasks WHERE run_id=? ORDER BY ordinal", (run_id,)
         ).fetchall()
 
-    def start(self, paper_id, experiment_id, max_units=32, max_source_chars=18000):
+    def start(self, paper_id, experiment_id, max_units=32, max_source_chars=18000, math_partition_v2=False, source_planning_retry_reason=None):
         from .planning import build_plan
 
         if not isinstance(experiment_id, str) or not 1 <= len(experiment_id) <= 100:
             raise ValueError("An explicit fresh experiment identifier is required")
         bundle = prepare_bundle(self.service.library, paper_id, self.service.directory / "assets")
+        if math_partition_v2:
+            from .math_partition import VERSION as PARTITION_VERSION
+            from .partition_planning import PartitionPlanner
+            # Read source metadata only, never previous Korean result payloads.
+            with self.service.store.connect() as con:
+                previous = [dict(r) for r in con.execute(
+                    "SELECT source FROM sessions WHERE paper_id=? AND experiment_id=?",
+                    (paper_id, experiment_id)).fetchall()]
+            if any(json.loads(r["source"]).get("translation_contract_version") != PARTITION_VERSION for r in previous):
+                raise ValueError("V2 requires a new explicit experiment, not a legacy quality-budget restart")
+            bundle, _partition_record = PartitionPlanner(self.service.library, self.runner,
+                self.service.directory / "math-partitions").prepare(bundle, experiment_id,
+                    **({"retry_failed_reason": source_planning_retry_reason} if source_planning_retry_reason is not None else {}))
         run_id = sha([VERSION, bundle["fingerprint"], experiment_id])
         settings = {
             "version": VERSION,
@@ -119,11 +153,15 @@ class Workflow:
             "max_repairs": self.max_repairs,
             "max_failures": self.max_failures,
         }
+        if math_partition_v2:
+            settings["math_partition_v2"] = True
+            settings["partition_manifest_sha256"] = bundle["math_partition"]["manifest"]["manifest_sha256"]
         with self.connect() as con:
             existing = con.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
         if existing:
             if json.loads(existing["settings"]) != settings:
                 raise ValueError("Cannot change settings of an existing run")
+            self._refresh_blocked_figure_evidence(run_id, bundle)
             return self.report(run_id)
         saved = self.service.store.begin(bundle, experiment_id)
         if any(
@@ -188,6 +226,46 @@ class Workflow:
             )
         return self.report(run_id)
 
+    def _refresh_blocked_figure_evidence(self, run_id, bundle):
+        """A new evidence version can require one fresh unresolved visual review."""
+        with self.connect() as con:
+            con.execute('BEGIN IMMEDIATE')
+            run = self._run(con, run_id)
+            if run['state'] in ('published', 'ready', 'source_changed'):
+                return
+            if run['fingerprint'] != bundle['fingerprint']:
+                raise ValueError('Cannot upgrade review evidence from another source')
+            rows = self._rows(con, run_id)
+            for row in rows:
+                if (row['kind'] != 'figure' or row['status'] != 'blocked'
+                        or row['phase'] != 'review' or row['lease']
+                        or not row['candidate'] or not row['review']
+                        or row['repair_count'] >= self.max_repairs):
+                    continue
+                previous = json.loads(row['review'])
+                if not any(i.get('verdict') == 'unresolved' for i in previous.get('items', [])):
+                    continue
+                latest = con.execute('SELECT event FROM events WHERE run_id=? AND task_id=? ORDER BY seq DESC LIMIT 1',
+                                     (run_id, row['id'])).fetchone()
+                if not latest or latest['event'] != 'review_found_issues':
+                    continue
+                claim = con.execute("SELECT payload FROM events WHERE run_id=? AND task_id=? AND event='claimed' AND phase='review' ORDER BY seq DESC LIMIT 1",
+                                    (run_id, row['id'])).fetchone()
+                if not claim:
+                    continue
+                old_version = json.loads(claim['payload'])['request'].get('figure_review_evidence_version')
+                if old_version == FIGURE_REVIEW_EVIDENCE_VERSION:
+                    continue
+                self._event(con, run_id, row['id'], 'review', 'visual_evidence_recheck_requested',
+                            {'previous_evidence_version': old_version,
+                             'new_evidence_version': FIGURE_REVIEW_EVIDENCE_VERSION,
+                             'previous_review': previous, 'previous_review_hash': row['review_input_hash'],
+                             'candidate_sha256': sha(json.loads(row['candidate'])),
+                             'fresh_review_required': True, 'translation_approval_granted': False})
+                con.execute("UPDATE tasks SET status='drafted',review=NULL,review_input_hash='' WHERE run_id=? AND id=?",
+                            (run_id, row['id']))
+                con.execute("UPDATE runs SET state='reviewing' WHERE id=?", (run_id,))
+
     @staticmethod
     def _blank(bundle):
         return {
@@ -200,6 +278,15 @@ class Workflow:
 
     def _normalize(self, bundle, task, answer):
         """Attach trusted identities; reject foreign selections and partial batches."""
+        # A new source-format gate must also check previously cached candidates.
+        if task["kind"] == "text":
+            by_id = {u["id"]: u for u in bundle["units"]}
+            for item in answer.get("items", []):
+                if item.get("unit_id") in by_id:
+                    validate_math_sentence_boundaries(by_id[item["unit_id"]], item["target"])
+                    if bundle.get("math_partition"):
+                        from .math_partition import validate_partition_target
+                        validate_partition_target(bundle["math_partition"], item["unit_id"], item["target"])
         cache_key = (bundle["fingerprint"], task["task_id"], sha(answer))
         if cache_key in self._normalized_cache:
             return copy.deepcopy(self._normalized_cache[cache_key])
@@ -276,6 +363,17 @@ class Workflow:
                 ):
                     raise ValueError(
                         "Figure label has foreign refs or invalid original-PDF coordinates"
+                    )
+                if (
+                    not refs
+                    and bbox
+                    and len(item["labels"]) > 1
+                    and (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+                    >= 0.98 * (right - left) * (bottom - top)
+                ):
+                    raise ValueError(
+                        "A multi-label figure cannot use its whole region as one phrase anchor; "
+                        "provide tight original-PDF bounds for each occurrence, or leave it unresolved"
                     )
             item["crop_sha256"] = task["figure"]["crop_sha256"]
             result["figure_reviews"] = [FigureReview.model_validate(item).model_dump()]
@@ -458,7 +556,78 @@ class Workflow:
                 request["validation_feedback"]["rejected_candidate"] = json.loads(
                     row["last_response"]
                 )
+        if phase in ("generate", "repair") and row["source_feedback"]:
+            feedback = json.loads(row["source_feedback"])
+            if feedback.get("bundle_fingerprint") == bundle["fingerprint"]:
+                request["source_verification_feedback"] = feedback
+        if task['kind'] == 'figure' and candidate is not None:
+            request['figure_review_evidence_version'] = FIGURE_REVIEW_EVIDENCE_VERSION
+            request['figure_output_evidence'] = self._figure_output_evidence(bundle, task, candidate)
+        if task['kind'] == 'figure':
+            figure_glyphs = self._figure_glyph_evidence(bundle, task, candidate)
+            if figure_glyphs is not None:
+                request['figure_label_glyph_evidence'] = figure_glyphs
+        if bundle.get("math_partition"):
+            selected=set(task["source_unit_ids"]) | set(request["context"].get("context_unit_ids", []))
+            manifest=bundle["math_partition"]["manifest"]
+            request["source_math_partition"]={"version":manifest["version"],
+                "manifest_sha256":manifest["manifest_sha256"],
+                "source_bundle_fingerprint":bundle["source_bundle_fingerprint"],
+                "parents":[copy.deepcopy(p) for p in manifest["parents"] if p["source_unit_id"] in selected]}
+        glyphs = self._source_glyph_evidence(bundle, task)
+        if glyphs is not None:
+            request['source_glyph_evidence'] = glyphs
         return request
+
+    def _figure_glyph_evidence(self, bundle, task, candidate):
+        library = self.service.library
+        if not hasattr(library, 'root'):
+            return None
+        from .source_figure_glyph_evidence import build_figure_label_glyph_evidence
+
+        selectors = None if candidate is None else [
+            {'source_refs': x.get('source_refs', []), 'bbox': x.get('bbox', [])}
+            for x in candidate['figures'][0]['labels']]
+        key = ('figure-native-glyph-v1', bundle['fingerprint'], task['figure']['block_id'], sha(selectors))
+        if key not in self._glyph_evidence_cache:
+            paper = library.paper(bundle['paper_id'])
+            self._glyph_evidence_cache[key] = build_figure_label_glyph_evidence(
+                bundle, task, candidate, pdf_path=library.root / paper['original_path'],
+                source_snapshot_path=library.root / 'sources' / f"{bundle['paper_id']}.json",
+                view_path=library.root / 'views' / f"{bundle['view_id']}.json")
+        return copy.deepcopy(self._glyph_evidence_cache[key])
+
+    def _source_glyph_evidence(self, bundle, task):
+        """Neutral original-PDF evidence, independent of candidates and verdicts."""
+        library = self.service.library
+        if not hasattr(library, 'root'):
+            # Synthetic orchestration fixtures have no actual PDF Library.
+            return None
+        from .source_glyph_evidence import build_source_glyph_evidence
+
+        units = task.get('units', [])
+        # A bounded selection must not let introductory prose crowd out code
+        # literals. This rank uses original unit data only, never a diagnosis.
+        def priority(unit):
+            if '/code_lines/' in unit['id']:
+                return 0
+            text = unit.get('source_text', '')
+            if re.search(r'([^\w\s])\1{2,}', text):
+                return 1
+            return 2
+        selected = [u['id'] for u in sorted(units, key=priority) if priority(u) < 2][:8]
+        if not selected:
+            return None
+        key = (bundle['fingerprint'], tuple(selected))
+        if key not in self._glyph_evidence_cache:
+            paper = library.paper(bundle['paper_id'])
+            self._glyph_evidence_cache[key] = build_source_glyph_evidence(
+                bundle, selected,
+                pdf_path=library.root / paper['original_path'],
+                source_snapshot_path=library.root / 'sources' / f"{bundle['paper_id']}.json",
+                view_path=library.root / 'views' / f"{bundle['view_id']}.json",
+            )
+        return copy.deepcopy(self._glyph_evidence_cache[key])
 
     def _with_images(self, bundle, task, request):
         images = list(task.get("images", []))
@@ -513,6 +682,19 @@ class Workflow:
             f = task["figure"]
             if hashlib.sha256(Path(f["crop"]).read_bytes()).hexdigest() != f["crop_sha256"]:
                 raise ValueError("Original figure image changed")
+            if request.get('candidate') is not None:
+                from .source_figure_evidence import figure_label_regions, pack_label_evidence
+
+                source = json.loads((library.root / 'sources' / f"{bundle['paper_id']}.json").read_text('utf-8'))
+                local = figure_label_regions(bundle, task, request['candidate'], source_snapshot=source)
+                directory = self.directory / 'source-images' / bundle['source_pdf_sha256'] / 'figure-labels'
+                packed = pack_label_evidence(pdf_path, source, local['regions'], directory,
+                                             base_image_count=len(set(images)))
+                images.extend(packed['images'])
+                evidence.extend(packed['manifest']['atlas_images'])
+                request['figure_label_evidence'] = {**local['manifest'], **packed['manifest'],
+                    'omissions': local['manifest']['omissions'] + packed['manifest']['omissions'],
+                    'omitted_label_ids': local['manifest']['omitted_label_ids'] + packed['manifest']['omitted_label_ids']}
         request["original_page_images"] = evidence
         request["attached_images"] = [
             {"path": p, "sha256": hashlib.sha256(Path(p).read_bytes()).hexdigest()}
@@ -533,13 +715,38 @@ class Workflow:
                     "structural_error",
                     "original_page_images",
                     "attached_images",
+                    "figure_label_evidence",
                 )
             }
         )
 
+    def _prewarm_claim(self, run_id):
+        """Fill content-keyed caches without holding a workflow write lock.
+
+        This snapshot grants no lease or verdict. claim re-reads all state and
+        re-runs its existing source/candidate/hash guards inside BEGIN IMMEDIATE.
+        """
+        with self.connect() as con:
+            run = self._run(con, run_id)
+            bundle = self._bundle(run)
+            rows = [dict(row) for row in self._rows(con, run_id)]
+        if run['state'] == 'published':
+            return
+        for row in rows:
+            packet = json.loads(row['packet'])
+            if row['candidate']:
+                try:
+                    self._normalize(bundle, packet, json.loads(row['candidate']))
+                except ValueError:
+                    # Only the existing transaction may invalidate a candidate
+                    # and journal that decision against freshly read state.
+                    pass
+            self._source_glyph_evidence(bundle, packet)
+
     def claim(self, run_id):
         from .prompts import response_schema
 
+        self._prewarm_claim(run_id)
         with self.connect() as con:
             con.execute("BEGIN IMMEDIATE")
             run = self._run(con, run_id)
@@ -560,6 +767,32 @@ class Workflow:
                         row["phase"],
                         "expired_lease_reclaimed",
                         {"old_lease": row["lease"]},
+                    )
+            rows = self._rows(con, run_id)
+            for row in rows:
+                if not row["candidate"] or row["lease"]:
+                    continue
+                try:
+                    self._normalize(bundle, json.loads(row["packet"]), json.loads(row["candidate"]))
+                except ValueError as exc:
+                    con.execute(
+                        "UPDATE tasks SET candidate=NULL,review=NULL,review_input_hash='',"
+                        "status='pending',phase='generate',failures=0,last_error=?,last_response=? "
+                        "WHERE run_id=? AND id=?",
+                        (str(exc), row["candidate"], run_id, row["id"]),
+                    )
+                    self._event(
+                        con,
+                        run_id,
+                        row["id"],
+                        "generate",
+                        "candidate_invalidated_by_validation",
+                        {
+                            "error": str(exc),
+                            "previous_candidate": json.loads(row["candidate"]),
+                            "previous_review": json.loads(row["review"]) if row["review"] else None,
+                            "fresh_generation_and_review_required": True,
+                        },
                     )
             rows = self._rows(con, run_id)
             # Finish generation in plan order before requesting any semantic approval.
@@ -612,11 +845,21 @@ class Workflow:
                 )
                 con.execute(
                     "UPDATE runs SET state=? WHERE id=?",
-                    ("needs_review" if status == "blocked" else
-                     ("generating" if phase == "generate" else "reviewing"), run_id),
+                    (
+                        "needs_review"
+                        if status == "blocked"
+                        else ("generating" if phase == "generate" else "reviewing"),
+                        run_id,
+                    ),
                 )
-                self._event(con, run_id, row["id"], phase, "image_preparation_failed",
-                            {"error": str(exc)[:12000], "failures": count})
+                self._event(
+                    con,
+                    run_id,
+                    row["id"],
+                    phase,
+                    "image_preparation_failed",
+                    {"error": str(exc)[:12000], "failures": count},
+                )
                 return None
             lease = uuid.uuid4().hex
             con.execute(
@@ -818,10 +1061,208 @@ class Workflow:
             )
         return self.report(run_id)
 
+    def retry_failed(self, run_id, reason):
+        """Explicitly retry bounded execution failures without undoing quality gates."""
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("An explicit nonempty execution retry reason is required")
+        retried = []
+        retried_phases = []
+        with self.connect() as con:
+            con.execute("BEGIN IMMEDIATE")
+            run = self._run(con, run_id)
+            self._bundle(run)
+            if run["state"] in ("published", "ready", "source_changed"):
+                raise ValueError(
+                    "Published, ready or source-changed workflows cannot retry failures"
+                )
+            rows = self._rows(con, run_id)
+            if any(
+                row["lease"]
+                and row["lease_until"] is not None
+                and row["lease_until"] >= time.time()
+                for row in rows
+            ):
+                raise ValueError("Cannot retry failures while a workflow lease is active")
+            failure_limit = json.loads(run["settings"])["max_failures"]
+            next_status = {"generate": "pending", "repair": "repair_pending", "review": "drafted"}
+            for row in rows:
+                if row["status"] != "blocked" or row["failures"] < failure_limit:
+                    continue
+                latest = con.execute(
+                    "SELECT seq,event,phase FROM events WHERE run_id=? AND task_id=? ORDER BY seq DESC LIMIT 1",
+                    (run_id, row["id"]),
+                ).fetchone()
+                if (
+                    not latest
+                    or latest["event"] not in ("provider_failed", "response_rejected", "image_preparation_failed")
+                    or row["phase"] not in next_status
+                ):
+                    continue
+                retry_phase = row["phase"]
+                if latest["event"] == "image_preparation_failed":
+                    # Image preparation precedes lease assignment, so a legacy
+                    # row can still say generate while its failed claim was review.
+                    retry_phase = latest["phase"]
+                    if retry_phase not in next_status or (
+                        retry_phase == "generate" and row["candidate"] is not None
+                    ) or (
+                        retry_phase in ("review", "repair") and not row["candidate"]
+                    ):
+                        continue
+                # Retain candidate/review/repair budget and exact rejected-output
+                # evidence. This grants another execution attempt, no approval.
+                con.execute(
+                    "UPDATE tasks SET status=?,phase=?,failures=0 WHERE run_id=? AND id=?",
+                    (next_status[retry_phase], retry_phase, run_id, row["id"]),
+                )
+                self._event(
+                    con,
+                    run_id,
+                    row["id"],
+                    retry_phase,
+                    "execution_retry_requested",
+                    {
+                        "reason": reason,
+                        "previous_failures": row["failures"],
+                        "previous_phase": row["phase"],
+                        "retry_phase": retry_phase,
+                        "previous_error": row["last_error"],
+                        "failure_event": latest["event"],
+                        "failure_event_seq": latest["seq"],
+                        "candidate_preserved": True,
+                        "review_preserved": True,
+                        "repair_count_preserved": row["repair_count"],
+                    },
+                )
+                retried.append(row["id"])
+                retried_phases.append(retry_phase)
+            if retried:
+                state = (
+                    "generating"
+                    if "generate" in retried_phases
+                    else "reviewing"
+                )
+                con.execute("UPDATE runs SET state=? WHERE id=?", (state, run_id))
+        report = self.report(run_id)
+        return {**report, "retried_count": len(retried), "retried_task_ids": retried}
+
+    def recheck_source_blocked(self, run_id, reason):
+        """Reinspect original evidence without granting translation approval."""
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("An explicit source reinspection reason is required")
+        if self.source_repairer is None:
+            raise ValueError("Independent source inspection is required")
+        with self.connect() as con:
+            run = self._run(con, run_id)
+            self._bundle(run)
+            if run['state'] in ('published', 'ready', 'source_changed'):
+                raise ValueError("Terminal or source-changed workflows cannot recheck source")
+            rows = self._rows(con, run_id)
+            if any(r['lease'] and r['lease_until'] >= time.time() for r in rows):
+                raise ValueError("Cannot recheck source while a workflow lease is active")
+            selected = [r['id'] for r in rows if r['status'] == 'blocked']
+        checked = []
+        for task_id in selected:
+            with self.connect() as con:
+                con.execute('BEGIN IMMEDIATE')
+                run = self._run(con, run_id)
+                bundle = self._bundle(run)
+                rows = self._rows(con, run_id)
+                if any(r['lease'] and r['lease_until'] >= time.time() for r in rows):
+                    raise ValueError("Cannot recheck source while a workflow lease is active")
+                row = next(r for r in rows if r['id'] == task_id)
+                latest = con.execute('SELECT event FROM events WHERE run_id=? AND task_id=? ORDER BY seq DESC LIMIT 1',
+                                     (run_id, task_id)).fetchone()
+                if row['status'] != 'blocked' or not latest or latest['event'] not in (
+                        'source_repair_blocked', 'source_recheck_failed'):
+                    continue
+                finding = con.execute("SELECT payload FROM events WHERE run_id=? AND task_id=? AND event='source_findings' ORDER BY seq DESC LIMIT 1",
+                                      (run_id, task_id)).fetchone()
+                if not finding:
+                    raise ValueError('Source block has no original observation evidence')
+                response = json.loads(finding['payload'])['translation_response']
+                request = self._request(bundle, row, rows, row['phase'])
+                try:
+                    images = self._with_images(bundle, json.loads(row['packet']), request)
+                except (OSError, ValueError, RuntimeError) as exc:
+                    self._event(con, run_id, task_id, 'source', 'source_recheck_failed',
+                                {'error': str(exc), 'reason': reason, 'translation_approval_granted': False})
+                    continue
+                lease = uuid.uuid4().hex
+                con.execute('UPDATE tasks SET lease=?,lease_until=? WHERE run_id=? AND id=?',
+                            (lease, time.time() + self.lease_seconds, run_id, task_id))
+                self._event(con, run_id, task_id, 'source', 'source_recheck_requested',
+                            {'reason': reason, 'original_response_sha256': sha(response),
+                             'translation_approval_granted': False})
+            task = {'task_id': task_id, 'lease_id': lease, 'request': request, 'images': images}
+            try:
+                result = self._inspect_source_response(run_id, task, response)
+                if result is None:
+                    with self.connect() as con:
+                        con.execute('BEGIN IMMEDIATE')
+                        _, _, current = self._lease(con, run_id, task_id, lease)
+                        status = ('pending' if not current['candidate'] else
+                                  'repair_pending' if current['phase'] == 'repair' else 'drafted')
+                        self._event(con, run_id, task_id, 'source', 'source_rechecked_requires_translation',
+                                    {'candidate_preserved': True, 'previous_review': json.loads(current['review']) if current['review'] else None,
+                                     'fresh_translation_review_required': True, 'translation_approval_granted': False})
+                        con.execute("UPDATE tasks SET status=?,review=NULL,review_input_hash='',lease=NULL,lease_until=NULL WHERE run_id=? AND id=?",
+                                    (status, run_id, task_id))
+                        con.execute('UPDATE runs SET state=? WHERE id=?',
+                                    ('generating' if status == 'pending' else 'reviewing', run_id))
+                checked.append(task_id)
+                if result and result['status'] == 'source_changed':
+                    break
+            except Exception as exc:
+                with self.connect() as con:
+                    con.execute('UPDATE tasks SET lease=NULL,lease_until=NULL WHERE run_id=? AND id=? AND lease=?',
+                                (run_id, task_id, lease))
+                    self._event(con, run_id, task_id, 'source', 'source_recheck_failed',
+                                {'error': str(exc), 'reason': reason, 'translation_approval_granted': False})
+        return {**self.report(run_id), 'source_rechecked_task_ids': checked}
+
+    def observe_source_change(self, run_id):
+        """Retire only an active run bound to a demonstrably different complete source.
+
+        No error-message matching and no candidate migration: this reads the old
+        stored identity without asserting it is current, checks the actual current
+        PDF/snapshot/view, and revokes every old lease while preserving all payloads.
+        A caller catching an error must re-raise it when this returns None.
+        """
+        keys = ('source_pdf_sha256', 'view_id', 'view_sha256', 'source_snapshot_sha256')
+        with self.connect() as con:
+            con.execute('BEGIN IMMEDIATE')
+            run = self._run(con, run_id)
+            if run['state'] in ('published', 'ready', 'cancelled'):
+                return None
+            old = self.service.store.source_bundle(run['session_id'])
+            if old['fingerprint'] != run['fingerprint'] or old['paper_id'] != run['paper_id']:
+                raise ValueError('Stored workflow source identity is inconsistent')
+            paper, _, _, identity = current_source(self.service.library, run['paper_id'])
+            if paper['status'] != 'complete' or paper['current_view_id'] != identity['view_id']:
+                raise ValueError('Current source is not a complete bound view')
+            if any(not isinstance(identity.get(key), str) or not identity[key] for key in keys):
+                raise ValueError('Current source identity is incomplete')
+            old_identity = {key: old[key] for key in keys}
+            new_identity = {key: identity[key] for key in keys}
+            if old_identity == new_identity:
+                return None
+            if run['state'] != 'source_changed':
+                rows = self._rows(con, run_id)
+                con.execute("UPDATE runs SET state='source_changed' WHERE id=?", (run_id,))
+                con.execute('UPDATE tasks SET lease=NULL,lease_until=NULL WHERE run_id=?', (run_id,))
+                self._event(con, run_id, None, 'source', 'external_source_change_observed', {
+                    'old_identity': old_identity, 'new_identity': new_identity,
+                    'revoked_task_ids': [row['id'] for row in rows if row['lease']],
+                    'task_payloads_preserved': True, 'prior_Korean_reusable': False,
+                    'fresh_empty_translation_required': True,
+                    'translation_approval_granted': False})
+        return self.report(run_id)
+
     def report(self, run_id):
         with self.connect() as con:
             run = self._run(con, run_id)
-            if run['state'] != 'source_changed':
+            if run["state"] != "source_changed":
                 self._bundle(run)
             rows = self._rows(con, run_id)
         counts = {
@@ -849,41 +1290,156 @@ class Workflow:
             "semantic_quality_proven": False,
         }
 
+    def _figure_output_evidence(self, bundle, packet, candidate):
+        """Use the actual reader projector, rather than infer emitted text from storage."""
+        from .math_partition import project_translation_bundle
+
+        try:
+            result = self._normalize(bundle, packet, candidate)
+            base = {'paper_id': bundle['paper_id'], 'view_id': bundle['view_id'],
+                    'blocks': copy.deepcopy(bundle['document']['blocks'])}
+            projected = project_translation_bundle(bundle, result, base)
+            block_id = packet['figure']['block_id']
+            original = next(b for b in base['blocks'] if b['id'] == block_id)
+            actual = next(b for b in projected['blocks'] if b['id'] == block_id)
+            emitted = actual['content'].get('translation_labels', [])
+            without_labels = copy.deepcopy(actual)
+            without_labels['content'].pop('translation_labels', None)
+            if without_labels != original:
+                raise ValueError('Figure projection changed original content')
+            return {'projection_available': True, 'block_id': block_id,
+                    'candidate_sha256': sha(candidate), 'original_raster_unchanged': True,
+                    'original_crop_sha256': packet['figure']['crop_sha256'],
+                    'emitted_translation_labels': emitted,
+                    'translation_approval_granted': False}
+        except (KeyError, ValueError, TypeError, StopIteration) as exc:
+            return {'projection_available': False, 'error': str(exc),
+                    'translation_approval_granted': False}
+
     def _inspect_source_response(self, run_id, task, response):
         """Route model observations to PDF-grounded source repair, never target editing."""
         if self.source_repairer is None:
             return None
-        observations = response.get('notes', []) + [dumps(i) for i in response.get('issues', [])]
+        observations = response.get("source_concerns", []) + [
+            dumps(i) for i in response.get("issues", [])
+        ]
         if not observations:
             return None
         with self.connect() as con:
             run = self._run(con, run_id)
             bundle = self._bundle(run)
-        packet = copy.deepcopy(task['request']['task'])
-        packet['context'] = task['request'].get('context', {})
-        findings = self.source_repairer.scan(bundle, packet, observations, task['images'])
+            row = con.execute('SELECT * FROM tasks WHERE run_id=? AND id=?',
+                              (run_id, task['task_id'])).fetchone()
+            if row is None:
+                raise ValueError('Source inspection has no current translation task')
+            current_candidate = (json.loads(row['candidate'])
+                                 if row['phase'] == 'review' and row['candidate'] else response)
+        packet = copy.deepcopy(task["request"]["task"])
+        packet["context"] = task["request"].get("context", {})
+        packet['candidate_to_inspect'] = copy.deepcopy(response)
+        packet['current_translation_candidate'] = copy.deepcopy(current_candidate)
+        if packet.get('kind') == 'figure':
+            packet['figure_output_evidence'] = self._figure_output_evidence(bundle, packet, current_candidate)
+        findings = self.source_repairer.scan(bundle, packet, observations, task["images"])
         if not findings:
+            feedback_reader = getattr(self.source_repairer, "get_scan_feedback", None)
+            feedback = (
+                feedback_reader(bundle, packet["task_id"])
+                if feedback_reader
+                else {
+                    "bundle_fingerprint": bundle["fingerprint"],
+                    "task_id": packet["task_id"],
+                    "findings": [],
+                    "notes": [],
+                }
+            )
+            if (
+                feedback.get("bundle_fingerprint") != bundle["fingerprint"]
+                or feedback.get("task_id") != packet["task_id"]
+                or feedback.get("findings")
+            ):
+                raise ValueError("Source feedback must bind the exact no-correction scan")
+            with self.connect() as con:
+                self._lease(con, run_id, task["task_id"], task["lease_id"])
+                con.execute(
+                    "UPDATE tasks SET source_feedback=? WHERE run_id=? AND id=? AND lease=?",
+                    (dumps(feedback), run_id, task["task_id"], task["lease_id"]),
+                )
+                self._event(
+                    con,
+                    run_id,
+                    task["task_id"],
+                    "source",
+                    "source_checked_no_correction",
+                    {
+                        "feedback": feedback,
+                        "response_sha256": sha(response),
+                        "observations": observations,
+                        "translation_quality_approved_by_this_scan": False,
+                    },
+                )
             return None
         serialized = [f.model_dump() for f in findings]
         with self.connect() as con:
-            self._event(con, run_id, task['task_id'], 'source', 'source_findings',
-                        {'findings': serialized, 'translation_response': response})
-            if any(f.kind == 'unresolved' for f in findings):
-                con.execute("UPDATE tasks SET status='blocked',last_error=?,lease=NULL,lease_until=NULL "
-                            'WHERE run_id=? AND id=?',
-                            ('Unresolved PDF/source transcription: ' + dumps(serialized), run_id, task['task_id']))
-                self._event(con, run_id, task['task_id'], 'source', 'source_repair_blocked',
-                            {'findings': serialized, 'translation_response_accepted': False})
-        if any(f.kind == 'unresolved' for f in findings):
+            self._event(
+                con,
+                run_id,
+                task["task_id"],
+                "source",
+                "source_findings",
+                {"findings": serialized, "translation_response": response},
+            )
+            if any(f.kind == "unresolved" for f in findings):
+                con.execute(
+                    "UPDATE tasks SET status='blocked',last_error=?,lease=NULL,lease_until=NULL "
+                    "WHERE run_id=? AND id=?",
+                    (
+                        "Unresolved PDF/source transcription: " + dumps(serialized),
+                        run_id,
+                        task["task_id"],
+                    ),
+                )
+                self._event(
+                    con,
+                    run_id,
+                    task["task_id"],
+                    "source",
+                    "source_repair_blocked",
+                    {"findings": serialized, "translation_response_accepted": False},
+                )
+        if any(f.kind == "unresolved" for f in findings):
             return self.report(run_id)
-        repaired = self.source_repairer.repair(bundle, findings)
-        if not repaired.get('report', {}).get('valid'):
-            raise ValueError('Source repair requires review: ' + dumps(repaired))
+        from .source_repair import SourceRepairBlocked
+
+        try:
+            repaired = self.source_repairer.repair(bundle, findings)
+        except SourceRepairBlocked as exc:
+            with self.connect() as con:
+                con.execute('BEGIN IMMEDIATE')
+                self._lease(con, run_id, task['task_id'], task['lease_id'])
+                if exc.details.get('bundle_fingerprint') != bundle['fingerprint']:
+                    raise ValueError('Source quality stop belongs to another source bundle') from exc
+                con.execute("UPDATE tasks SET status='blocked',last_error=?,lease=NULL,lease_until=NULL "
+                            'WHERE run_id=? AND id=? AND lease=?',
+                            (str(exc), run_id, task['task_id'], task['lease_id']))
+                self._event(con, run_id, task['task_id'], 'source', 'source_repair_blocked', {
+                    'findings': serialized, 'source_repair_quality_stop': exc.details,
+                    'bundle_fingerprint': bundle['fingerprint'],
+                    'translation_response_accepted': False, 'translation_approval_granted': False})
+            return self.report(run_id)
+        if not repaired.get("report", {}).get("valid"):
+            raise ValueError("Source repair requires review: " + dumps(repaired))
         with self.connect() as con:
             con.execute("UPDATE runs SET state='source_changed' WHERE id=?", (run_id,))
-            con.execute('UPDATE tasks SET lease=NULL,lease_until=NULL WHERE run_id=?', (run_id,))
-            self._event(con, run_id, task['task_id'], 'source', 'source_repaired_restart_required',
-                        {'repair': repaired, 'prior_Korean_reusable': False})
+            con.execute("UPDATE tasks SET lease=NULL,lease_until=NULL WHERE run_id=?", (run_id,))
+            self._event(
+                con,
+                run_id,
+                task["task_id"],
+                "source",
+                "source_repaired_restart_required",
+                {"repair": repaired, "prior_Korean_reusable": False},
+            )
         return self.report(run_id)
 
     def step(self, run_id):
@@ -902,10 +1458,18 @@ class Workflow:
             if getattr(exc, "kind", None) == "cancelled":
                 with self.connect() as con:
                     con.execute("UPDATE runs SET state='cancelled' WHERE id=?", (run_id,))
-                    con.execute('UPDATE tasks SET lease=NULL,lease_until=NULL WHERE run_id=? AND id=?',
-                                (run_id, task['task_id']))
-                    self._event(con, run_id, task['task_id'], task['phase'], 'execution_cancelled',
-                                {'error': str(exc), 'failure_budget_consumed': False})
+                    con.execute(
+                        "UPDATE tasks SET lease=NULL,lease_until=NULL WHERE run_id=? AND id=?",
+                        (run_id, task["task_id"]),
+                    )
+                    self._event(
+                        con,
+                        run_id,
+                        task["task_id"],
+                        task["phase"],
+                        "execution_cancelled",
+                        {"error": str(exc), "failure_budget_consumed": False},
+                    )
                 return self.report(run_id)
             return self.fail(run_id, task["task_id"], task["lease_id"], str(exc))
         return self.submit(
@@ -989,6 +1553,10 @@ class Workflow:
             validation = verify_result(bundle, result, require_complete=True)
             if not validation["complete"]:
                 raise ValueError("Full source-bound final validation failed: " + dumps(validation))
+            if bundle.get("math_partition"):
+                from .math_partition import project_translation_bundle
+                project_translation_bundle(bundle, result, {"paper_id":bundle["paper_id"],
+                    "view_id":bundle["view_id"], "blocks":copy.deepcopy(bundle["document"]["blocks"])})
             saved = self.service.store.read(run["session_id"], bundle["fingerprint"])
             if saved["result"] != result and (
                 saved["revision"] != 0

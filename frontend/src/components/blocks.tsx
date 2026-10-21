@@ -1,5 +1,6 @@
 import { Fragment, useMemo, type ComponentType, type ReactNode } from 'react';
 import katex from 'katex';
+import { ExplanationBlockContext, ExplanationTrigger, useExplanationTargets } from './reader/ExplanationContext';
 import type { BlockContent, BlockType, DocumentBlock, Run } from '../types';
 
 export function SourceImage({ url, inline = false }: { url: string | null; inline?: boolean }) {
@@ -12,27 +13,54 @@ export function SourceImage({ url, inline = false }: { url: string | null; inlin
 export function MathContent({ latex, verified, image, display = false }: {
   latex: string | null; verified: boolean; image: string | null; display?: boolean;
 }) {
-  if (verified && latex) {
-    try {
-      const markup = katex.renderToString(latex, {
-        displayMode: display, throwOnError: true, trust: false, strict: 'error', maxExpand: 1000,
-      });
-      // Only KaTeX output reaches this sink, with trust disabled. Original prose is React text.
-      return <span className="rendered-math" dangerouslySetInnerHTML={{ __html: markup }} />;
-    } catch { /* Preserve the original region when KaTeX rejects the reconstruction. */ }
-  }
-  return <span className="math-fallback"><SourceImage url={image} inline={!display} /></span>;
+  const markup = useMemo(() => {
+    if (!verified || !latex) return null;
+    try { return katex.renderToString(latex, {
+      displayMode: display, throwOnError: true, trust: false, strict: 'error', maxExpand: 1000,
+    }); } catch { return null; }
+  }, [verified, latex, display]);
+  // Only KaTeX output reaches this sink, with trust disabled. Original prose is React text.
+  return markup ? <span className="rendered-math" dangerouslySetInnerHTML={{ __html: markup }} />
+    : <span className="math-fallback"><SourceImage url={image} inline={!display} /></span>;
 }
 
-export function Runs({ runs }: { runs: Run[] }) {
+export function Runs({ runs, field = 'runs' }: { runs: Run[]; field?: string }) {
   return runs.map((run, index) => <Fragment key={index}>
-    {run.prefix}{run.kind === 'text' ? <StyledText run={run} /> : <MathContent latex={run.latex}
-      verified={run.source_verified} image={run.image_url} />}
+    {run.prefix}<RunContent run={run} field={field} index={index} />
   </Fragment>);
 }
+function RunContent({run, field, index}: {run: Run; field: string; index: number}) {
+  const {targets} = useExplanationTargets(field, index);
+  if (run.kind === 'math') {
+    const math = <MathContent latex={run.latex} verified={run.source_verified} image={run.image_url} />;
+    const target = targets.find(item => item.kind === 'math' && (item.anchor_text ?? item.source_text) === run.latex);
+    return target ? <ExplanationTrigger target={target}>{math}</ExplanationTrigger> : math;
+  }
+  // Python anchor offsets count Unicode code points, not UTF-16 code units.
+  const characters = Array.from(run.text);
+  const valid = targets.filter(item => (item.kind === 'term' || item.anchor_type === 'text_math') && item.start !== null && item.end !== null
+    && item.start >= 0 && item.end > item.start && item.end <= characters.length
+    && characters.slice(item.start, item.end).join('') === (item.anchor_text ?? item.source_text))
+    .sort((a, b) => a.start! - b.start!);
+  // A reviewed whole relation owns its text fragments. Never let a glossary
+  // occurrence consume the variable while the remaining relation opens math.
+  const formulas = valid.filter(item => item.anchor_type === 'text_math');
+  const matches = valid.filter(item => item.kind !== 'term' || !formulas.some(formula =>
+    formula.start! < item.end! && item.start! < formula.end!));
+  const pieces: ReactNode[] = [];
+  let cursor = 0;
+  for (const target of matches) {
+    if (target.start! < cursor) continue;
+    if (target.start! > cursor) pieces.push(characters.slice(cursor, target.start!).join(''));
+    pieces.push(<ExplanationTrigger key={`${target.id}:${target.block_id}:${target.field}:${target.run_index}:${target.start}:${target.end}`} target={target}>{target.anchor_text ?? target.source_text}</ExplanationTrigger>);
+    cursor = target.end!;
+  }
+  if (cursor < characters.length) pieces.push(characters.slice(cursor).join(''));
+  return <StyledText run={run}>{pieces.length ? pieces : run.text}</StyledText>;
+}
 
-function StyledText({ run }: { run: Extract<Run, { kind: 'text' }> }) {
-  let body: ReactNode = run.text;
+function StyledText({ run, children }: { run: Extract<Run, { kind: 'text' }>; children?: ReactNode }) {
+  let body: ReactNode = children ?? run.text;
   if (run.bold) body = <strong>{body}</strong>;
   if (run.italic) body = <em>{body}</em>;
   if (run.underline) body = <u>{body}</u>;
@@ -50,12 +78,17 @@ export function Heading({ content }: Props) {
 export const Paragraph = ({ content }: Props) => <p><Runs runs={content.runs} /></p>;
 export function List({ content }: Props) {
   const Tag = content.ordered ? 'ol' : 'ul';
-  return <Tag>{content.items.map((runs, i) => <li key={i}><Runs runs={runs} /></li>)}</Tag>;
+  return <Tag>{content.items.map((runs, i) => <li key={i}><Runs runs={runs} field={`items/${i}`} /></li>)}</Tag>;
 }
-export const Equation = ({ content }: Props) => <div className="equation-scroll">
-  <MathContent latex={content.latex} verified={content.source_verified} image={content.image_url} display />
-  {content.number ? <span className="equation-number">{content.number}</span> : null}
-</div>;
+export function Equation({ content }: Props) {
+  const {targets} = useExplanationTargets('latex', null);
+  const target = targets.find(item => item.kind === 'math' && (item.anchor_text ?? item.source_text) === content.latex);
+  const math = <MathContent latex={content.latex} verified={content.source_verified} image={content.image_url} display />;
+  return <div className="equation-with-explanation"><div className="equation-scroll">{target
+    ? <ExplanationTrigger target={target} display>{math}</ExplanationTrigger> : math}
+    {content.number ? <span className="equation-number">{content.number}</span> : null}</div>
+    {target ? <ExplanationTrigger target={target} compact>해설</ExplanationTrigger> : null}</div>;
+}
 export const Figure = ({ content }: Props) => <figure aria-describedby={content.caption_id ? `block-${content.caption_id}` : undefined}>
   <SourceImage url={content.image_url} />
   {content.translation_labels?.length ? <details className="figure-translations"><summary>그림 안의 한국어 번역</summary>
@@ -74,7 +107,7 @@ export function Table({ content }: Props) {
     <table><tbody>{[...rows].map(([index, cells]) => <tr key={index}>
       {cells.map(cell => { const Tag = cell.header ? 'th' : 'td';
         return <Tag key={cell.column} rowSpan={cell.rowspan} colSpan={cell.colspan}>
-          <Runs runs={cell.runs} /></Tag>;
+          <Runs runs={cell.runs} field={`cells/${content.cells.indexOf(cell)}`} /></Tag>;
       })}</tr>)}</tbody></table></div>;
 }
 export const Caption = ({ content }: Props) => <p className="caption-text"><Runs runs={content.runs} /></p>;
@@ -86,7 +119,7 @@ export function Code({ content }: Props) {
   const lines = content.code_lines ?? [];
   return <div className="code-scroll"><pre className="code-content"><code data-language={content.language ?? undefined}>
     {lines.map((line, index) => <Fragment key={index}>
-      {' '.repeat(line.indent)}<Runs runs={line.runs} />{index < lines.length - 1 ? '\n' : ''}
+      {' '.repeat(line.indent)}<Runs runs={line.runs} field={`code_lines/${index}`} />{index < lines.length - 1 ? '\n' : ''}
     </Fragment>)}
   </code></pre></div>;
 }
@@ -102,7 +135,7 @@ export function BlockView({ block, children }: { block: DocumentBlock; children?
   return <section id={`block-${block.id}`} className={`document-block ${block.type}`}
     data-block-type={block.type} data-block-id={block.id}
     data-group-role={block.content.group_role ?? undefined}>
-    <div className="block-body"><Component content={block.content} />{children}</div>
+    <ExplanationBlockContext.Provider value={block.id}><div className="block-body"><Component content={block.content} />{children}</div></ExplanationBlockContext.Provider>
   </section>;
 }
 
